@@ -14,18 +14,18 @@
   --font-sans: "IBM Plex Sans Arabic", "Segoe UI", tahoma, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
 
-  --color-canvas: #12110e;
-  --color-panel: #211e19;
-  --color-panel-2: #2c2822;
-  --color-ink: #f3ecdf;
-  --color-muted: #a89884;
-  --color-faint: #7c7164;
-  --color-line: #3d362c;
-  --color-brass: #e0b15a;
-  --color-brass-ink: #1c1408;
-  --color-clay: #d46a4c;
-  --color-desk: #16110d;
-  --color-desk-head: #3c3226;
+  --color-canvas: #111111;
+  --color-panel: #1a1a1a;
+  --color-panel-2: #242424;
+  --color-ink: #f7f7f5;
+  --color-muted: #b5b5b0;
+  --color-faint: #8a8a84;
+  --color-line: #333330;
+  --color-brass: #ff6a00;
+  --color-brass-ink: #1a0d00;
+  --color-clay: #e10600;
+  --color-desk: #141414;
+  --color-desk-head: #2a2a2a;
 }
 
 @layer base {
@@ -58,6 +58,17 @@
 .desk-actions {
   width: 7rem;
   flex: none;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+
+  body {
+    background: white;
+    color: black;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

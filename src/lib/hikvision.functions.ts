@@ -74,3 +74,16 @@ export const pullChunkFn = createServerFn({ method: "POST" })
     const { pullChunk } = await import("./hikvision.server");
     return pullChunk(data);
   });
+
+const gateSchema = z.object({
+  username: z.string().trim().min(1).max(64),
+  password: z.string().min(1).max(128),
+});
+
+export const openGateFn = createServerFn({ method: "POST" })
+  .validator((data: { username: string; password: string }) => gateSchema.parse(data))
+  .handler(async ({ data }) => {
+    const username = data.username.trim().toLowerCase();
+    if (username === "skyline" && data.password === "Skyline@2026") return { ok: true as const };
+    return { ok: false as const, error: "اليوزر أو الباسورد غلط." };
+  });

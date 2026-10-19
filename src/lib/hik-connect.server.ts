@@ -494,9 +494,12 @@ function menuNodes(value: unknown, into: MenuNode[] = []): MenuNode[] {
   return into;
 }
 
-function isFirstLastReport(node: MenuNode): boolean {
+function reportKind(node: MenuNode): "transaction" | "firstlast" | "" {
   const text = `${node.translatedName ?? ""} ${node.name ?? ""} ${node.componentName ?? ""}`.toLowerCase();
-  return /first[\s_-]*in[\s_-]*last[\s_-]*out/.test(text) || (text.includes("first") && text.includes("last") && text.includes("out"));
+  if (text.includes("mobile")) return "";
+  if (/\btransaction\b/.test(text) || text.includes("original")) return "transaction";
+  if (/first[\s_-]*in/.test(text) && /last/.test(text) && /out/.test(text)) return "firstlast";
+  return "";
 }
 
 function plainCell(value: unknown): string {
@@ -507,6 +510,22 @@ function plainCell(value: unknown): string {
   }
   if (typeof value === "string") return value.trim();
   if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return "";
+}
+
+function pictureUrl(info: Record<string, unknown>): string {
+  const direct = plainCell(info.headPicUrl || info.photoUrl || info.faceUrl || info.smallPicUrl);
+  if (direct) return direct;
+  const stack: unknown[] = [info];
+  while (stack.length) {
+    const current = stack.pop();
+    if (typeof current === "string" && (/^https?:\/\//.test(current) || current.startsWith("/")) && /pic|photo|face|head|image/i.test(current)) {
+      return current;
+    }
+    if (current && typeof current === "object") {
+      for (const value of Object.values(current as Record<string, unknown>)) stack.push(value);
+    }
+  }
   return "";
 }
 
@@ -553,7 +572,9 @@ function punchesFromReport(rows: unknown[], columns: Record<string, unknown>[]):
       const dateMatch = /(\d{4}-\d{2}-\d{2})/.exec(cell.value);
       if (!date && dateMatch && /date|day/.test(cell.label)) date = dateMatch[1];
       const clock = clockOf(cell.value);
-      if (clock && /first|last|clock|check|time|in|out/.test(cell.label) && !/period|duration|hour|weekday/.test(cell.label)) {
+      const shiftBound = clock === "00:00:00" || clock === "23:59:00" || clock === "23:59:59";
+      const skipLabel = /period|duration|hour|weekday|shift|valid|schedule|timetable|range|plan/.test(cell.label);
+      if (clock && !shiftBound && !skipLabel && /first|last|clock|check|time|in|out|transaction/.test(cell.label)) {
         times.push(clock);
       }
     }
@@ -619,7 +640,7 @@ async function fetchPeople(base: string, sessionId: string): Promise<CloudPerson
       const name = plainCell(info.fullName) || [plainCell(info.firstName), plainCell(info.lastName)].filter(Boolean).join(" ");
       const employeeNo = plainCell(info.personCode ?? info.employeeNo ?? info.id);
       if (!name && !employeeNo) continue;
-      found.push({ employeeNo: employeeNo || name, name: name || employeeNo, url: plainCell(info.headPicUrl) });
+      found.push({ employeeNo: employeeNo || name, name: name || employeeNo, url: pictureUrl(info) });
     }
     if (list.length < 100) break;
   }
@@ -648,7 +669,9 @@ async function pullFirstLastReport(base: string, input: CloudChunkRequest, offse
   if (portalError(menu.json, menu.status) || !menu.json) return null;
   const payload = (menu.json.data && typeof menu.json.data === "object" ? menu.json.data : menu.json) as Record<string, unknown>;
   const nodes = menuNodes(payload.menuList ?? payload);
-  const report = nodes.find((node) => node.reportTypeId != null && node.reportTypeId >= 0 && isFirstLastReport(node));
+  const transaction = nodes.find((node) => node.reportTypeId != null && node.reportTypeId >= 0 && reportKind(node) === "transaction");
+  const firstLast = nodes.find((node) => node.reportTypeId != null && node.reportTypeId >= 0 && reportKind(node) === "firstlast");
+  const report = transaction ?? firstLast;
   if (!report || report.reportTypeId == null) {
     const titles = nodes.map((node) => node.translatedName || node.name).filter(Boolean).slice(0, 8).join("، ");
     return { ok: false, error: titles ? `مفيش تقرير First In Last Out. اللي ظاهر: ${titles}` : "مفيش تقرير First In Last Out في القائمة." };

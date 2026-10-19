@@ -12,7 +12,7 @@ import {
   tableToPunches,
   type Punch,
 } from "@/lib/attendance";
-import { pullChunkFn, testDeviceFn, hikLoginFn, hikPullFn } from "@/lib/hikvision.functions";
+import { pullChunkFn, testDeviceFn, hikLoginFn, hikPullFn, openGateFn } from "@/lib/hikvision.functions";
 import { DeviceDesk, seedDevices, type DeskDevice } from "@/components/device-desk";
 import { buildXlsx, sheetRows } from "@/lib/xlsx-io";
 
@@ -84,13 +84,14 @@ export function AttendanceBoard() {
   const pullChunk = useServerFn(pullChunkFn);
   const hikLogin = useServerFn(hikLoginFn);
   const hikPull = useServerFn(hikPullFn);
+  const openGate = useServerFn(openGateFn);
   const fileRef = useRef<HTMLInputElement>(null);
   const runRef = useRef(0);
   const errorRef = useRef("");
   const noteRef = useRef("دي بيانات مثال عشان تشوف شكل الشيت. اسحب من جهازك أو ارفع ملف.");
   const skipDeskSave = useRef(true);
 
-  const [mode, setMode] = useState<"cloud" | "direct">("cloud");
+  const [mode, setMode] = useState<"cloud" | "team" | "direct">("team");
   const [cloud, setCloud] = useState<{ apiBase: string; sessionId: string; featureCode: string } | null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
   const [teamId, setTeamId] = useState("");
@@ -120,6 +121,12 @@ export function AttendanceBoard() {
   const [notice, setNotice] = useState("دي بيانات مثال عشان تشوف شكل الشيت. اسحب من جهازك أو ارفع ملف.");
   const [devices, setDevices] = useState<DeskDevice[]>(seedDevices);
   const [linkOpen, setLinkOpen] = useState("");
+  const [gateOpen, setGateOpen] = useState(false);
+  const [gateUser, setGateUser] = useState("");
+  const [gatePass, setGatePass] = useState("");
+  const [gateError, setGateError] = useState("");
+  const [gateBusy, setGateBusy] = useState(false);
+  const portal = mode !== "direct";
 
   function report(message: string) {
     errorRef.current = message;
@@ -135,6 +142,7 @@ export function AttendanceBoard() {
     const saved = loadSaved();
     const storedFeature = localStorage.getItem("awwal-akher-feature") ?? "";
     if (storedFeature) setFeatureCode(storedFeature);
+    if (sessionStorage.getItem("skyline-gate") === "1") setGateOpen(true);
     if (saved) {
       setHost(saved.host);
       setPort(saved.port || 80);
@@ -143,7 +151,7 @@ export function AttendanceBoard() {
       setRemember(Boolean(saved.remember));
       if (saved.remember && saved.password) setPassword(saved.password);
       if (saved.shift) setShift(saved.shift);
-      if (saved.mode === "direct" || saved.mode === "cloud") setMode(saved.mode);
+      if (saved.mode === "direct" || saved.portal) setMode(saved.mode);
     }
     const end = new Date();
     const start = new Date(end.getFullYear(), end.getMonth(), 1);
@@ -305,7 +313,7 @@ export function AttendanceBoard() {
   }
 
   async function onTest() {
-    if (mode === "cloud") {
+    if (portal) {
       await onCloudLogin();
       return;
     }
@@ -432,7 +440,7 @@ export function AttendanceBoard() {
   }
 
   async function onPull() {
-    if (mode === "cloud") {
+    if (portal) {
       await onCloudPull();
       return;
     }
@@ -607,20 +615,75 @@ export function AttendanceBoard() {
     URL.revokeObjectURL(url);
   }
 
+  function downloadPdf() {
+    document.title = `SKY LINE ${from} ${to}`;
+    window.print();
+  }
+
+  async function enterGate() {
+    setGateBusy(true);
+    setGateError("");
+    try {
+      const result = await openGate({ data: { username: gateUser, password: gatePass } });
+      if (!result.ok) {
+        setGateError(result.error);
+        return;
+      }
+      sessionStorage.setItem("skyline-gate", "1");
+      setGateOpen(true);
+    } catch {
+      setGateError("الدخول فشل. حاول تاني.");
+    } finally {
+      setGateBusy(false);
+    }
+  }
+
+  if (!gateOpen) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-canvas px-4 text-ink">
+        <form
+          className="flex w-full max-w-sm flex-col gap-4 rounded-lg border border-line bg-panel p-6"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void enterGate();
+          }}
+        >
+          <div>
+            <p className="text-xs tracking-[0.2em] text-brass">SKY LINE</p>
+            <h1 className="mt-1 text-2xl font-semibold">دخول التقرير</h1>
+          </div>
+          <label className="flex flex-col gap-2 text-sm text-muted">
+            اليوزر
+            <input className={fieldClass} dir="ltr" autoComplete="username" value={gateUser} onChange={(event) => setGateUser(event.target.value)} />
+          </label>
+          <label className="flex flex-col gap-2 text-sm text-muted">
+            الباسورد
+            <input className={fieldClass} dir="ltr" type="password" autoComplete="current-password" value={gatePass} onChange={(event) => setGatePass(event.target.value)} />
+          </label>
+          {gateError ? <p className="text-sm text-clay">{gateError}</p> : null}
+          <button type="submit" disabled={gateBusy} className="h-11 rounded-md bg-brass font-medium text-brass-ink disabled:opacity-50">
+            {gateBusy ? "بندخل…" : "ادخل"}
+          </button>
+        </form>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-canvas text-ink">
       <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-6 md:px-8 md:py-10">
-        <header className="flex flex-wrap items-end justify-between gap-4 border-b border-line pb-6">
+        <header className="no-print flex flex-wrap items-end justify-between gap-4 border-b border-line pb-6">
           <div className="flex items-center gap-3">
             <Mark className="size-12 shrink-0 text-brass" />
             <div>
-              <h1 className="text-3xl font-semibold leading-tight">أول وآخر</h1>
-              <p className="mt-1 text-sm text-muted">حضور وانصراف هيكفيجن — أول بصمة وآخر بصمة لكل شخص</p>
+              <h1 className="text-3xl font-semibold leading-tight tracking-wide">SKY LINE</h1>
+              <p className="mt-1 text-sm text-muted">أول بصمة وآخر بصمة — تقرير الحضور</p>
             </div>
           </div>
           <p className="rounded-full border border-brass px-3 py-2 text-sm text-brass">{sourceText}</p>
         </header>
 
+        <div className="no-print">
         <DeviceDesk
           devices={devices}
           busy={busy !== null}
@@ -633,6 +696,7 @@ export function AttendanceBoard() {
           onSetTime={setClock}
           onStopDaily={stopDaily}
         />
+        </div>
 
         <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
           <Stat label="الأشخاص" value={String(people)} />
@@ -641,13 +705,25 @@ export function AttendanceBoard() {
           <Stat label="بصمة واحدة" value={String(missingCount)} warn={missingCount > 0} />
         </section>
 
-        <div className="grid gap-4 lg:grid-cols-5">
+        <div className="no-print grid gap-4 lg:grid-cols-5">
           <section className="flex flex-col gap-4 rounded-lg border border-line bg-panel p-4 md:p-6 lg:col-span-2">
             <div className="flex items-center gap-2">
               <Fingerprint className="size-5 text-brass" aria-hidden="true" />
               <h2 className="text-lg font-semibold">الاتصال</h2>
             </div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <button
+                type="button"
+                aria-pressed={mode === "team"}
+                onClick={() => setMode("team")}
+                className={
+                  mode === "team"
+                    ? "h-11 rounded-md bg-brass px-3 text-sm font-medium text-brass-ink"
+                    : "h-11 rounded-md border border-line px-3 text-sm font-medium text-ink"
+                }
+              >
+                هيك-كونكت تيم
+              </button>
               <button
                 type="button"
                 aria-pressed={mode === "cloud"}
@@ -673,7 +749,7 @@ export function AttendanceBoard() {
                     : "h-11 rounded-md border border-line px-3 text-sm font-medium text-ink"
                 }
               >
-                عنوان الجهاز
+                البصمة العادية
               </button>
             </div>
             {mode === "direct" ? (
@@ -717,12 +793,12 @@ export function AttendanceBoard() {
               </>
             ) : null}
             <label className="flex flex-col gap-2 text-sm text-muted">
-              {mode === "cloud" ? "حساب الموقع" : "المستخدم"}
+              {portal ? "حساب الموقع" : "المستخدم"}
               <input
                 className={fieldClass}
                 dir="ltr"
                 autoComplete="username"
-                placeholder={mode === "cloud" ? "يوزر أو إيميل أو موبايل" : "admin"}
+                placeholder={portal ? "يوزر أو إيميل أو موبايل" : "admin"}
                 value={username}
                 onChange={(event) => setUsername(event.target.value)}
               />
@@ -738,7 +814,7 @@ export function AttendanceBoard() {
                 onChange={(event) => setPassword(event.target.value)}
               />
             </label>
-            {mode === "cloud" && teams.length > 0 ? (
+            {portal && teams.length > 0 ? (
               <label className="flex flex-col gap-2 text-sm text-muted">
                 الفريق على الموقع
                 <select className={fieldClass} value={teamId} onChange={(event) => setTeamId(event.target.value)}>
@@ -750,7 +826,7 @@ export function AttendanceBoard() {
                 </select>
               </label>
             ) : null}
-            {mode === "cloud" && (needSms || smsCode) ? (
+            {portal && (needSms || smsCode) ? (
               <label className="flex flex-col gap-2 text-sm text-muted">
                 كود الرسالة
                 <input
@@ -764,7 +840,7 @@ export function AttendanceBoard() {
                 />
               </label>
             ) : null}
-            {mode === "cloud" && captchaImage ? (
+            {portal && captchaImage ? (
               <label className="flex flex-col gap-2 text-sm text-muted">
                 كود الصورة من الموقع
                 <img src={captchaImage} alt="كود التحقق" className="h-16 w-40 rounded-md border border-line bg-white object-contain" />
@@ -793,7 +869,7 @@ export function AttendanceBoard() {
               className="inline-flex h-11 items-center justify-center gap-2 rounded-md border border-line bg-panel-2 px-4 font-medium text-ink disabled:opacity-50"
             >
               {busy === "test" ? <LoaderCircle className="size-4 animate-spin" /> : null}
-              {busy === "test" ? "بكلم الموقع…" : mode === "cloud" ? "ادخل على الموقع" : "اختبر الاتصال"}
+              {busy === "test" ? "بكلم الموقع…" : portal ? "ادخل على الموقع" : "اختبر الاتصال"}
             </button>
             {busy === "test" ? (
               <p className="rounded-md border border-line px-3 py-3 text-sm text-ink" role="status">
@@ -805,13 +881,13 @@ export function AttendanceBoard() {
                 {error}
               </p>
             ) : null}
-            {mode === "cloud" && deviceLabel && busy !== "test" ? (
+            {portal && deviceLabel && busy !== "test" ? (
               <p className="rounded-md border border-line px-3 py-3 text-sm text-brass" role="status">
                 {notice || `الدخول تم. ${deviceLabel}`}
               </p>
             ) : null}
             <p className="text-sm leading-relaxed text-faint">
-              {mode === "cloud" ? (
+              {portal ? (
                 <>
                   نفس حساب الموقع: اختار Phone، واترك الرقم <span dir="ltr">0100xxxxxxxx</span>. لو الموقع طلب كود الرسالة، اكتبه هنا واضغط ادخل تاني.{" "}
                   <a
@@ -928,9 +1004,17 @@ export function AttendanceBoard() {
               </button>
               <button
                 type="button"
+                onClick={downloadPdf}
+                disabled={!shown.length}
+                className="no-print inline-flex h-11 items-center justify-center gap-2 rounded-md border border-brass px-4 font-medium text-brass disabled:opacity-50"
+              >
+                PDF
+              </button>
+              <button
+                type="button"
                 onClick={downloadExcel}
                 disabled={!shown.length}
-                className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-brass px-4 font-medium text-brass-ink disabled:opacity-50"
+                className="no-print inline-flex h-11 items-center justify-center gap-2 rounded-md bg-brass px-4 font-medium text-brass-ink disabled:opacity-50"
               >
                 <Download className="size-4" aria-hidden="true" />
                 نزّل إكسل
@@ -938,6 +1022,12 @@ export function AttendanceBoard() {
             </div>
           </div>
 
+          <div className="hidden print:block">
+            <p className="text-xs tracking-[0.2em]">SKY LINE</p>
+            <p>
+              First In / Last Out · <span dir="ltr">{from}</span> — <span dir="ltr">{to}</span>
+            </p>
+          </div>
           {roster.length ? (
             <div className="mt-4 flex gap-3 overflow-x-auto pb-2">
               {roster.map((person) => (
@@ -956,7 +1046,7 @@ export function AttendanceBoard() {
             <p className="py-10 text-center text-muted">مفيش صفوف مطابقة.</p>
           ) : (
             <>
-              <ul className="mt-4 flex flex-col gap-3 md:hidden">
+              <ul className="mt-4 flex flex-col gap-3">
                 {shown.map((row) => (
                   <li key={`${row.employeeNo}-${row.date}-${row.name}`} className="rounded-lg border border-line bg-canvas p-4">
                     <div className="flex items-start justify-between gap-3">
@@ -974,7 +1064,7 @@ export function AttendanceBoard() {
                       </div>
                       <Status text={row.status} bad={row.late || row.missingOut} />
                     </div>
-                    <dl className="mt-3 grid grid-cols-3 gap-2 text-sm">
+                    <dl className="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
                       <div>
                         <dt className="text-faint">أول بصمة</dt>
                         <dd className="mt-1 text-base">
@@ -984,6 +1074,12 @@ export function AttendanceBoard() {
                       <div>
                         <dt className="text-faint">آخر بصمة</dt>
                         <dd className="mt-1 text-base">{row.last ? <Ltr mono>{row.last}</Ltr> : "—"}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-faint">اشتغل</dt>
+                        <dd className="mt-1 text-base">
+                          <Ltr mono>{row.hours == null ? "—" : `${row.hours} س`}</Ltr>
+                        </dd>
                       </div>
                       <div>
                         <dt className="text-faint">المدة</dt>
@@ -996,7 +1092,7 @@ export function AttendanceBoard() {
                 ))}
               </ul>
 
-              <div className="mt-4 hidden md:block">
+              <div className="mt-4 hidden">
                 <table className="w-full border-collapse text-sm">
                   <thead>
                     <tr className="border-b border-line text-muted">
@@ -1065,6 +1161,7 @@ function Status({ text, bad }: { text: string; bad: boolean }) {
 
 function PersonFace({ people, employeeNo, name }: { people: RosterPerson[]; employeeNo: string; name: string }) {
   const person = people.find((item) => item.employeeNo === employeeNo || item.name === name);
-  if (!person?.photo) return null;
-  return <img src={person.photo} alt="" className="size-9 rounded-full object-cover" />;
+  if (person?.photo) return <img src={person.photo} alt="" className="size-12 rounded-full object-cover" />;
+  const letter = (name || employeeNo || "?").trim().slice(0, 1).toUpperCase();
+  return <span className="flex size-12 shrink-0 items-center justify-center rounded-full bg-brass text-sm font-semibold text-brass-ink">{letter}</span>;
 }
