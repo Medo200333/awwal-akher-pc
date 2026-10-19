@@ -10,6 +10,7 @@ import {
   parseCsv,
   parseHtmlTable,
   tableToPunches,
+  type DayRow,
   type Punch,
 } from "@/lib/attendance";
 import { pullChunkFn, testDeviceFn, hikLoginFn, hikPullFn, openGateFn } from "@/lib/hikvision.functions";
@@ -126,6 +127,7 @@ export function AttendanceBoard() {
   const [gatePass, setGatePass] = useState("");
   const [gateError, setGateError] = useState("");
   const [gateBusy, setGateBusy] = useState(false);
+  const [board, setBoard] = useState<"list" | "transaction">("list");
   const portal = mode !== "direct";
 
   function report(message: string) {
@@ -340,7 +342,7 @@ export function AttendanceBoard() {
     }
   }
 
-  async function onCloudPull() {
+  async function onCloudPull(kind?: "transaction") {
     report("");
     say("");
     if (!username.trim() || !password) {
@@ -377,6 +379,7 @@ export function AttendanceBoard() {
         setDeviceLabel(login.teamName);
       }
       const collected: Punch[] = [];
+      setBoard(kind === "transaction" ? "transaction" : "list");
       let pageIndex = 1;
       let done = false;
       let guard = 0;
@@ -395,6 +398,7 @@ export function AttendanceBoard() {
             timeZone: "Africa/Cairo",
             pageIndex,
             elementIds: teams.map((team) => team.id).filter(Boolean).join(","),
+            kind,
           },
         });
         if (runRef.current !== id) return;
@@ -441,9 +445,9 @@ export function AttendanceBoard() {
     }
   }
 
-  async function onPull() {
+  async function onPull(kind?: "transaction") {
     if (portal) {
-      await onCloudPull();
+      await onCloudPull(kind);
       return;
     }
     report("");
@@ -939,6 +943,14 @@ export function AttendanceBoard() {
               </button>
               <button
                 type="button"
+                onClick={() => void onPull("transaction")}
+                disabled={busy !== null}
+                className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-md border border-brass px-4 font-medium text-brass disabled:opacity-50"
+              >
+                Transaction
+              </button>
+              <button
+                type="button"
                 onClick={() => fileRef.current?.click()}
                 disabled={busy !== null}
                 className="inline-flex h-11 items-center justify-center gap-2 rounded-md border border-line bg-panel-2 px-4 font-medium text-ink disabled:opacity-50"
@@ -1055,7 +1067,8 @@ export function AttendanceBoard() {
             <p className="py-10 text-center text-muted">مفيش صفوف مطابقة.</p>
           ) : (
             <>
-              <ul className="mt-4 flex flex-col gap-3">
+              {board === "transaction" ? <WeekBoard rows={shown} people={roster} /> : null}
+              <ul className={board === "transaction" ? "hidden" : "mt-4 flex flex-col gap-3"}>
                 {shown.map((row) => (
                   <li key={`${row.employeeNo}-${row.date}-${row.name}`} className="rounded-lg border border-line bg-canvas p-4">
                     <div className="flex items-start justify-between gap-3">
@@ -1166,6 +1179,91 @@ function Stat({ label, value, warn = false }: { label: string; value: string; wa
 
 function Status({ text, bad }: { text: string; bad: boolean }) {
   return <span className={bad ? "text-clay" : "text-brass"}>{text}</span>;
+}
+
+function saturdayOf(iso: string): string {
+  const [year, month, day] = iso.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 1) % 7));
+  return date.toISOString().slice(0, 10);
+}
+
+function plusDays(iso: string, count: number): string {
+  const [year, month, day] = iso.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() + count);
+  return date.toISOString().slice(0, 10);
+}
+
+const WEEK = ["السبت", "الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة"];
+
+function WeekBoard({ rows, people }: { rows: DayRow[]; people: RosterPerson[] }) {
+  const weeks = new Map<string, DayRow[]>();
+  for (const row of rows) {
+    const start = saturdayOf(row.date);
+    const list = weeks.get(start);
+    if (list) list.push(row);
+    else weeks.set(start, [row]);
+  }
+  const starts = [...weeks.keys()].sort();
+  if (!starts.length) return null;
+  return (
+    <div className="mt-4 flex flex-col gap-6">
+      {starts.map((start) => {
+        const days = WEEK.map((_, index) => plusDays(start, index));
+        const inWeek = weeks.get(start) ?? [];
+        const names = new Map<string, { employeeNo: string; name: string }>();
+        for (const row of inWeek) names.set(row.employeeNo || row.name, { employeeNo: row.employeeNo, name: row.name });
+        return (
+          <div key={start} className="overflow-x-auto">
+            <table className="w-full min-w-[760px] border-collapse text-sm" dir="rtl">
+              <thead>
+                <tr className="bg-brass text-brass-ink">
+                  <th className="border border-line px-3 py-2 text-right font-medium">الشخص</th>
+                  {days.map((date, index) => (
+                    <th key={date} className="border border-line px-2 py-2 text-center font-medium">
+                      <div>{WEEK[index]}</div>
+                      <div className="font-mono text-xs" dir="ltr">{date.slice(5)}</div>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {[...names.values()].map((person) => (
+                  <tr key={person.employeeNo || person.name}>
+                    <td className="border border-line bg-panel px-3 py-2">
+                      <span className="flex items-center justify-end gap-2">
+                        <span>
+                          <span className="block font-medium">{person.name}</span>
+                          <span className="block text-xs text-muted" dir="ltr">{person.employeeNo}</span>
+                        </span>
+                        <PersonFace people={people} employeeNo={person.employeeNo} name={person.name} />
+                      </span>
+                    </td>
+                    {days.map((date) => {
+                      const cell = inWeek.find((row) => row.date === date && (row.employeeNo === person.employeeNo || row.name === person.name));
+                      return (
+                        <td key={date} className="border border-line px-2 py-2 text-center">
+                          {cell ? (
+                            <>
+                              <div dir="ltr" className="font-mono">{cell.first}</div>
+                              <div dir="ltr" className="font-mono text-muted">{cell.last || "—"}</div>
+                            </>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function PersonFace({ people, employeeNo, name }: { people: RosterPerson[]; employeeNo: string; name: string }) {

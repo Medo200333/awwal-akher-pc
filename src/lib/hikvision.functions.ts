@@ -49,6 +49,7 @@ const cloudChunkSchema = z.object({
   timeZone: z.string().trim().min(1).max(64),
   pageIndex: z.number().int().min(1).max(500),
   elementIds: z.string().trim().max(4000).optional(),
+  kind: z.enum(["transaction"]).optional(),
 });
 
 export type CloudLoginInput = z.infer<typeof cloudLoginSchema>;

@@ -30,6 +30,7 @@ export type CloudChunkRequest = {
   timeZone: string;
   pageIndex: number;
   elementIds?: string;
+  kind?: "transaction";
 };
 
 export type CloudPerson = { employeeNo: string; name: string; photo: string };
@@ -755,12 +756,13 @@ async function readReportPage(
   filters: Record<string, unknown>[],
   range: string,
 ): Promise<{ rows: unknown[]; error: string; noMore: boolean }> {
-  const filterList = filters.map((filter) => {
+  const filterList = filters.flatMap((filter) => {
     const columnName = plainCell(filter.target ?? filter.columnName);
-    const operation = plainCell(filter.operation) || "IN";
+    const operation = plainCell(filter.operation) || "BETWEEN";
     const inputType = Number(filter.inputType);
-    const dateFilter = inputType === 3 || inputType === 5 || /date|time/.test(columnName);
-    return { columnName, operation, value: dateFilter ? range : "" };
+    const dateFilter = inputType === 3 || inputType === 5 || /date|time|period/.test(columnName);
+    if (!dateFilter || !columnName) return [];
+    return [{ columnName, operation: operation === "IN" ? "BETWEEN" : operation, value: range }];
   });
   const result = await readBody(`${base}/hccattendance/report/v1/list`, {
     method: "POST",
@@ -791,12 +793,21 @@ async function pullFirstLastReport(base: string, input: CloudChunkRequest, offse
   if (portalError(menu.json, menu.status) || !menu.json) return null;
   const payload = (menu.json.data && typeof menu.json.data === "object" ? menu.json.data : menu.json) as Record<string, unknown>;
   const nodes = menuNodes(payload.menuList ?? payload);
+  const textOf = (node: MenuNode) => `${node.translatedName ?? ""} ${node.name ?? ""} ${node.componentName ?? ""}`.toLowerCase();
   const candidates = nodes
-    .filter((node) => node.reportTypeId != null && node.reportTypeId >= 0 && reportKind(node) !== "")
-    .sort((a, b) => (reportKind(a) === "transaction" ? -1 : 1) - (reportKind(b) === "transaction" ? -1 : 1));
+    .filter((node) => {
+      if (node.reportTypeId == null || node.reportTypeId < 0) return false;
+      const text = textOf(node);
+      if (text.includes("mobile")) return false;
+      if (input.kind === "transaction") return /\btransaction\b/.test(text);
+      return reportKind(node) !== "";
+    })
+    .sort((a, b) => Number(/\btransaction\b/.test(textOf(b))) - Number(/\btransaction\b/.test(textOf(a))));
   if (!candidates.length) {
     const titles = nodes.map((node) => node.translatedName || node.name).filter(Boolean).slice(0, 8).join("، ");
-    return { ok: false, error: titles ? `مفيش تقرير الحضور. اللي ظاهر: ${titles}` : "مفيش تقرير الحضور في القائمة." };
+    return { ok: false, error: input.kind === "transaction"
+      ? `مفيش تقرير Transaction. اللي ظاهر: ${titles || "ولا حاجة"}`
+      : titles ? `مفيش تقرير الحضور. اللي ظاهر: ${titles}` : "مفيش تقرير الحضور في القائمة." };
   }
   const headersForRead = headersForTeam;
   const ranges = [
