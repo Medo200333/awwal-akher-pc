@@ -76,13 +76,14 @@ function concat(parts: Uint8Array[]): Uint8Array {
 export function attendancePdfBytes(from: string, to: string, rows: DayRow[], people: Face[]): Uint8Array {
   const encoder = new TextEncoder();
   const text = (value: string) => encoder.encode(value);
-  const left = 8 * PT;
-  const right = 289 * PT;
-  const photoW = 16 * PT;
-  const nameW = 32 * PT;
-  const dayW = (right - left - photoW - nameW * 2) / 7;
-  const rowH = 16 * PT;
-  const headH = 12 * PT;
+  const photoW = 14 * PT;
+  const nameW = 24 * PT;
+  const dayW = 24 * PT;
+  const tableW = photoW + nameW * 2 + dayW * 7;
+  const left = (297 * PT - tableW) / 2;
+  const right = left + tableW;
+  const rowH = 13.5 * PT;
+  const headH = 11 * PT;
   const pageW = 297 * PT;
   const pageH = 210 * PT;
   const bottom = 14 * PT;
@@ -145,7 +146,22 @@ export function attendancePdfBytes(from: string, to: string, rows: DayRow[], peo
         if (photo) {
           if (!photos.has(key)) photos.set(key, photo);
           const slot = [...photos.keys()].indexOf(key) + 1;
-          commands += `q ${12 * PT} 0 0 ${12 * PT} ${left + 2 * PT} ${y - rowH + 2 * PT} cm /Im${slot} Do Q\n`;
+          const size = 11 * PT;
+          const imgX = left + (photoW - size) / 2;
+          const imgY = y - rowH + (rowH - size) / 2;
+          const radius = size / 2;
+          const cx = imgX + radius;
+          const cy = imgY + radius;
+          const k = 0.5522847498;
+          const circle = [
+            `${cx - radius} ${cy} m`,
+            `${cx - radius} ${cy + radius * k} ${cx - radius * k} ${cy + radius} ${cx} ${cy + radius} c`,
+            `${cx + radius * k} ${cy + radius} ${cx + radius} ${cy + radius * k} ${cx + radius} ${cy} c`,
+            `${cx + radius} ${cy - radius * k} ${cx + radius * k} ${cy - radius} ${cx} ${cy - radius} c`,
+            `${cx - radius * k} ${cy - radius} ${cx - radius} ${cy - radius * k} ${cx - radius} ${cy} c`,
+          ].join("\n");
+          commands += `q\n${circle}\nW n\n${size} 0 0 ${size} ${imgX} ${imgY} cm /Im${slot} Do Q\n`;
+          commands += `q 0.047 0.239 0.4 RG 0.7 w\n${circle}\nS Q\n`;
         }
         commands += `BT /F1 9 Tf 0.063 0.141 0.2 rg 1 0 0 1 ${left + photoW + 4} ${y - 9 * PT} Tm (${pdfText(parts.first.slice(0, 18))}) Tj ET\n`;
         commands += `BT /F2 9 Tf 1 0 0 1 ${left + photoW + nameW + 4} ${y - 9 * PT} Tm (${pdfText(parts.last.slice(0, 18))}) Tj ET\n`;
@@ -153,15 +169,15 @@ export function attendancePdfBytes(from: string, to: string, rows: DayRow[], peo
           const cell = inWeek.find((row) => row.date === date && (row.employeeNo === person.employeeNo || row.name === person.name));
           const edge = left + photoW + nameW * 2 + dayW * dayIndex;
           commands += `0.557 0.639 0.71 RG ${edge} ${y - rowH} m ${edge} ${y} l S\n`;
-          const x = edge + 4;
+          const x = edge + 3;
           if (!cell) {
-            commands += `BT /F2 8 Tf 0.557 0.639 0.71 rg 1 0 0 1 ${x + 8} ${y - 9 * PT} Tm (-) Tj ET\n`;
+            commands += `BT /F2 8 Tf 0.557 0.639 0.71 rg 1 0 0 1 ${edge + dayW / 2 - 3} ${y - rowH / 2 - 2} Tm (-) Tj ET\n`;
             return;
           }
           const stay = cell.minutes == null ? "" : formatMinutes(cell.minutes);
-          commands += `BT /F1 8 Tf 0.047 0.239 0.4 rg 1 0 0 1 ${x} ${y - 4.2 * PT} Tm (${pdfText(cell.first)}) Tj ET\n`;
-          commands += `BT /F2 8 Tf 0.063 0.141 0.2 rg 1 0 0 1 ${x} ${y - 8.2 * PT} Tm (${pdfText(cell.last || "-")}) Tj ET\n`;
-          commands += `BT /F2 7 Tf 0.302 0.384 0.451 rg 1 0 0 1 ${x} ${y - 12.2 * PT} Tm (${pdfText(stay)}) Tj ET\n`;
+          commands += `BT /F1 8 Tf 0.047 0.239 0.4 rg 1 0 0 1 ${x} ${y - 3.4 * PT} Tm (${pdfText(cell.first)}) Tj ET\n`;
+          commands += `BT /F2 8 Tf 0.063 0.141 0.2 rg 1 0 0 1 ${x} ${y - 6.8 * PT} Tm (${pdfText(cell.last || "-")}) Tj ET\n`;
+          commands += `BT /F2 6.5 Tf 0.302 0.384 0.451 rg 1 0 0 1 ${x} ${y - 10.2 * PT} Tm (${pdfText(stay)}) Tj ET\n`;
         });
         y -= rowH;
       });
