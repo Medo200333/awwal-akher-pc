@@ -775,11 +775,26 @@ export function AttendanceBoard() {
               type="button"
               onClick={onTest}
               disabled={busy !== null}
-              className="h-11 rounded-md border border-line bg-panel-2 px-4 font-medium text-ink disabled:opacity-50"
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-md border border-line bg-panel-2 px-4 font-medium text-ink disabled:opacity-50"
             >
-              {busy === "test" ? "بفتح الموقع…" : mode === "cloud" ? "ادخل على الموقع" : "اختبر الاتصال"}
+              {busy === "test" ? <LoaderCircle className="size-4 animate-spin" /> : null}
+              {busy === "test" ? "بكلم الموقع…" : mode === "cloud" ? "ادخل على الموقع" : "اختبر الاتصال"}
             </button>
-            {deviceLabel ? <p className="text-sm text-brass">{deviceLabel}</p> : null}
+            {busy === "test" ? (
+              <p className="rounded-md border border-line px-3 py-3 text-sm text-ink" role="status">
+                بكلم موقع هيك-كونكت من الكمبيوتر. استنى، ممكن ياخد دقيقة. مش هيفتح صفحة جديدة.
+              </p>
+            ) : null}
+            {error ? (
+              <p className="rounded-md border border-clay px-3 py-3 text-sm text-clay" role="alert">
+                {error}
+              </p>
+            ) : null}
+            {mode === "cloud" && deviceLabel && busy !== "test" ? (
+              <p className="rounded-md border border-line px-3 py-3 text-sm text-brass" role="status">
+                {notice || `الدخول تم. ${deviceLabel}`}
+              </p>
+            ) : null}
             <p className="text-sm leading-relaxed text-faint">
               {mode === "cloud" ? (
                 <>
