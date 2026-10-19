@@ -3,6 +3,7 @@ import { punchesFromPortal } from "./hikvision-parse";
 import type { Punch } from "./attendance";
 
 const PORTAL = "https://www.hik-connect.com";
+const TEAM_API = "https://ieu-team.hikcentralconnect.com/hcc";
 const PAGE_SIZE = 100;
 const PAGES_PER_CALL = 2;
 
@@ -18,7 +19,7 @@ export type CloudLogin =
       teamName: string;
       notice: string;
     }
-  | { ok: false; error: string; captcha?: string; featureCode?: string };
+  | { ok: false; error: string; captcha?: string; featureCode?: string; needSms?: boolean };
 
 export type CloudChunkRequest = {
   apiBase: string;
@@ -49,7 +50,9 @@ export function normalizeAccount(account: string): string {
   if (!trimmed) return "";
   if (trimmed.includes("@") || /[A-Za-z]/.test(trimmed)) return trimmed;
   const digits = trimmed.replace(/^\+/, "").replace(/\D/g, "");
-  if (/^01\d{9}$/.test(digits)) return `20${digits.slice(1)}`;
+  // الموقع بيبعت مفتاح الدولة + الرقم زي ما اتكتب، والصفر فضل موجود: 20 + 0100... = 200100...
+  if (/^01\d{9}$/.test(digits)) return `20${digits}`;
+  if (/^201\d{9}$/.test(digits)) return `200${digits.slice(2)}`;
   return digits || trimmed;
 }
 
@@ -70,12 +73,16 @@ function assertPortal(value: string): string {
     host.endsWith(".hikcentralconnect.com") ||
     host.endsWith(".ltspartnerconnect.com");
   if (!allowed) throw new Error("نطاق هيك-كونكت مش معروف.");
+  if (host.endsWith(".hikcentralconnect.com")) {
+    const path = url.pathname.replace(/\/$/, "");
+    return `https://${host}${path}`;
+  }
   return `https://${host}`;
 }
 
 function portalMessage(code: number): string {
   if (code === 1013 || code === 1014 || code === 1226) {
-    return "الحساب أو كلمة السر مش زي اللي على موقع hik-connect.com. لو داخل بالموبايل اكتبه 2010xxxxxxxx.";
+    return "الحساب أو كلمة السر مش زي اللي على موقع hik-connect.com. لو داخل بالموبايل سيبه 0100xxxxxxxx والبرنامج يضيف 20.";
   }
   if (code === 1003 || code === 1005 || code === 1011 || code === 1012 || code === 1015 || code === 1101) {
     return "الموقع طالب كود الصورة. اكتبه تحت واضغط ادخل تاني.";
@@ -84,7 +91,7 @@ function portalMessage(code: number): string {
   if (code === 1402) return "الموقع رفض تشفير كلمة السر. جرّب تاني.";
   if (code === 1406) return "الحساب ده واقف مؤقتاً. افتح الموقع وجرب تدخل منه.";
   if (code === 6002) {
-    return "الموقع طالب تأكيد على الإيميل أو الموبايل. افتح hik-connect.com وسجّل دخول مرة، وبعدين ارجع هنا.";
+    return "الموقع بعت كود على الموبايل. اكتبه في خانة كود الرسالة واضغط ادخل تاني.";
   }
   return `موقع هيك-كونكت رفض الدخول (${code}).`;
 }
@@ -174,6 +181,7 @@ async function loginAt(
   feature: string,
   imageCode: string,
   preset?: { password: string; index: string },
+  smsCode = "",
 ): Promise<LoginHit> {
   const secret = preset?.password || encryptPassword(await publicKey(base, feature), password);
   const form = new URLSearchParams({
@@ -185,6 +193,11 @@ async function loginAt(
   });
   if (imageCode) form.set("imageCode", imageCode);
   if (preset?.index) form.set("enSecretIndex", preset.index);
+  if (smsCode) {
+    form.set("smsCode", smsCode);
+    form.set("bizType", "TERMINAL_BIND");
+    form.set("msgType", "1");
+  }
   const result = await readBody(`${base}/v3/users/login/v6`, {
     method: "POST",
     headers: { ...headers(feature), "Content-Type": "application/x-www-form-urlencoded" },
@@ -267,16 +280,17 @@ async function openTeam(base: string, sessionId: string, feature: string): Promi
   };
 }
 
-export async function hikLogin(account: string, password: string, imageCode = "", featureInput = ""): Promise<CloudLogin> {
+export async function hikLogin(account: string, password: string, imageCode = "", featureInput = "", smsCode = ""): Promise<CloudLogin> {
   const feature = featureCode(featureInput);
   const name = normalizeAccount(account);
+  const codeFromPhone = smsCode.trim();
   try {
     let base = PORTAL;
     let preset: { password: string; index: string } | undefined;
     let accountOnHost = name;
     let hit: LoginHit = { ok: false, error: "الدخول فشل.", code: 0 };
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      hit = await loginAt(base, accountOnHost, password, feature, imageCode.trim(), preset);
+      hit = await loginAt(base, accountOnHost, password, feature, imageCode.trim(), preset, codeFromPhone);
       if ("redirect" in hit) {
         base = hit.redirect;
         accountOnHost = hit.account || name;
@@ -292,23 +306,131 @@ export async function hikLogin(account: string, password: string, imageCode = ""
     if ("redirect" in hit) return { ok: false, error: "هيك-كونكت حوّل المنطقة أكتر من مرة.", featureCode: feature };
     if (!hit.ok) {
       const image = needsCaptcha(hit.code) ? await captchaImage(base, name, feature).catch(() => "") : "";
-      return { ok: false, error: hit.error, featureCode: feature, captcha: image || undefined };
+      return {
+        ok: false,
+        error: hit.error,
+        featureCode: feature,
+        captcha: image || undefined,
+        needSms: hit.code === 6002 || undefined,
+      };
     }
-    const team = await openTeam(hit.base, hit.sessionId, feature);
+    const gate = await enterAttendance(hit.base, hit.sessionId, name, feature, codeFromPhone);
+    if (!gate.ok) return { ok: false, error: gate.error, featureCode: feature, needSms: gate.needSms };
     return {
       ok: true,
-      apiBase: hit.base,
-      sessionId: team.sessionId,
+      apiBase: gate.apiBase,
+      sessionId: gate.sessionId,
       featureCode: feature,
-      teams: team.teams,
-      teamName: team.teams[0]?.name ?? "",
-      notice: team.notice,
+      teams: gate.teams,
+      teamName: gate.teams[0]?.name ?? "",
+      notice: gate.notice,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
     if (/timeout|abort/i.test(message)) return { ok: false, error: "موقع هيك-كونكت ما ردش في الوقت. جرّب تاني.", featureCode: feature };
     return { ok: false, error: message || "مش قادر أوصل لموقع هيك-كونكت.", featureCode: feature };
   }
+}
+
+async function enterAttendance(
+  base: string,
+  sessionId: string,
+  account: string,
+  feature: string,
+  smsCode: string,
+): Promise<
+  | { ok: true; apiBase: string; sessionId: string; teams: PortalTeam[]; notice: string }
+  | { ok: false; error: string; needSms?: boolean }
+> {
+  if (smsCode) {
+    await readBody(`${base}/v3/terminals`, {
+      method: "POST",
+      headers: { ...headers(feature, sessionId), "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        msgType: "1",
+        cname: "Chrome",
+        featureCode: feature,
+        checkcode: smsCode,
+        bizType: "TERMINAL_BIND",
+      }),
+    });
+  }
+  const ticketResponse = await fetch(`${TEAM_API}/auth/security/v1/ticket/login`, {
+    method: "POST",
+    headers: {
+      clientSource: "0",
+      clientType: "48",
+      lang: "en-US",
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      sessionId,
+    },
+    body: JSON.stringify({
+      loginType: 2,
+      sessionId,
+      account,
+      chooseTenantId: "",
+      twoFactorToken: smsCode,
+      deviceName: "Chrome",
+      terminalCode: feature,
+    }),
+    signal: AbortSignal.timeout(25_000),
+  });
+  const ticketJson = (await ticketResponse.json()) as Record<string, unknown>;
+  const errorCode = String(ticketJson.errorCode ?? "");
+  if (errorCode === "VMS002039") {
+    if (!smsCode) {
+      await readBody(`${base}/v3/users/checkcode/mt`, {
+        method: "POST",
+        headers: { ...headers(feature, sessionId), "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ from: account, bizType: "TERMINAL_BIND" }),
+      });
+    }
+    return {
+      ok: false,
+      error: smsCode
+        ? "الكود اترفض. اطلب كود جديد من الموقع وابعت اللي يوصل."
+        : "بوابة الاتندنس طلبت كود الرسالة. اكتبه في خانة كود الرسالة واضغط ادخل تاني.",
+      needSms: true,
+    };
+  }
+  if (errorCode && errorCode !== "0") {
+    return { ok: false, error: `بوابة الاتندنس رفضت الدخول (${errorCode}).` };
+  }
+  const data =
+    ticketJson.data && typeof ticketJson.data === "object" ? (ticketJson.data as Record<string, unknown>) : {};
+  const cookie = ticketResponse.headers.getSetCookie?.().find((item) => item.startsWith("JSESSIONID="));
+  const nextSession = cookie?.split(";")[0]?.slice("JSESSIONID=".length) || String(data.sessionId ?? "");
+  if (!nextSession) return { ok: false, error: "البوابة فتحت بس الجلسة ما رجعتش." };
+  const teamName = String(data.systemName ?? "Sky Line");
+  const points = await readBody(`${TEAM_API}/hccattendance/checkPoint/v1/list`, {
+    method: "POST",
+    headers: {
+      clientSource: "0",
+      clientType: "48",
+      lang: "en-US",
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      Cookie: `JSESSIONID=${nextSession}`,
+    },
+    body: JSON.stringify({ page: 1, pageSize: 50, name: "" }),
+  });
+  const pointData = points.json?.data && typeof points.json.data === "object" ? (points.json.data as Record<string, unknown>) : {};
+  const raw = pointData.checkPoints;
+  const teams: PortalTeam[] = [];
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      if (!item || typeof item !== "object") continue;
+      const row = item as { id?: unknown; elementId?: unknown; name?: unknown };
+      const id = String(row.elementId ?? row.id ?? "");
+      const label = String(row.name ?? "جهاز");
+      if (id) teams.push({ id, name: label });
+    }
+  }
+  const notice = teams.length
+    ? `اتفتح فريق ${teamName}. أجهزة الحضور: ${teams.map((team) => team.name).join("، ")}.`
+    : `اتفتح فريق ${teamName}.`;
+  return { ok: true, apiBase: TEAM_API, sessionId: nextSession, teams, notice };
 }
 
 function zoneOffset(timeZone: string, day: string): string {

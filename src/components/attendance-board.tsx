@@ -96,6 +96,8 @@ export function AttendanceBoard() {
   const [featureCode, setFeatureCode] = useState("");
   const [captcha, setCaptcha] = useState("");
   const [captchaImage, setCaptchaImage] = useState("");
+  const [smsCode, setSmsCode] = useState("");
+  const [needSms, setNeedSms] = useState(false);
   const [host, setHost] = useState("");
   const [port, setPort] = useState(80);
   const [https, setHttps] = useState(false);
@@ -270,6 +272,7 @@ export function AttendanceBoard() {
           account: username.trim(),
           password,
           imageCode: captcha.trim(),
+          smsCode: smsCode.trim(),
           featureCode,
         },
       });
@@ -280,11 +283,14 @@ export function AttendanceBoard() {
         setTeams([]);
         setTeamId("");
         setCaptchaImage(result.captcha ?? "");
+        setNeedSms(Boolean(result.needSms));
         if (result.captcha) setCaptcha("");
         return;
       }
       setCaptcha("");
       setCaptchaImage("");
+      setSmsCode("");
+      setNeedSms(false);
       setCloud({ apiBase: result.apiBase, sessionId: result.sessionId, featureCode: result.featureCode });
       setTeams(result.teams);
       setTeamId(result.teams[0]?.id ?? "");
@@ -340,18 +346,21 @@ export function AttendanceBoard() {
     try {
       if (!session) {
         const login = await hikLogin({
-          data: { account: username.trim(), password, imageCode: captcha.trim(), featureCode },
+          data: { account: username.trim(), password, imageCode: captcha.trim(), smsCode: smsCode.trim(), featureCode },
         });
         if (runRef.current !== id) return;
         if (login.featureCode) rememberFeature(login.featureCode);
         if (!login.ok) {
           report(login.error);
           setCaptchaImage(login.captcha ?? "");
+          setNeedSms(Boolean(login.needSms));
           if (login.captcha) setCaptcha("");
           return;
         }
         setCaptcha("");
         setCaptchaImage("");
+        setSmsCode("");
+        setNeedSms(false);
         session = { apiBase: login.apiBase, sessionId: login.sessionId, featureCode: login.featureCode };
         setCloud(session);
         setTeams(login.teams);
@@ -726,6 +735,20 @@ export function AttendanceBoard() {
                 </select>
               </label>
             ) : null}
+            {mode === "cloud" && (needSms || smsCode) ? (
+              <label className="flex flex-col gap-2 text-sm text-muted">
+                كود الرسالة
+                <input
+                  className={fieldClass}
+                  dir="ltr"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  placeholder="الكود اللي وصل على الموبايل"
+                  value={smsCode}
+                  onChange={(event) => setSmsCode(event.target.value.replace(/\D/g, "").slice(0, 8))}
+                />
+              </label>
+            ) : null}
             {mode === "cloud" && captchaImage ? (
               <label className="flex flex-col gap-2 text-sm text-muted">
                 كود الصورة من الموقع
@@ -760,11 +783,10 @@ export function AttendanceBoard() {
             <p className="text-sm leading-relaxed text-faint">
               {mode === "cloud" ? (
                 <>
-                  نفس الحساب اللي بتدخل بيه على موقع هيك-كونكت، مش يوزر البصمة نفسها. لو الموبايل مصري اكتبه{" "}
-                  <span dir="ltr">2010xxxxxxxx</span>. متبعتش كلمة السر في الشات.{" "}
+                  نفس حساب الموقع: اختار Phone، واترك الرقم <span dir="ltr">0100xxxxxxxx</span>. لو الموقع طلب كود الرسالة، اكتبه هنا واضغط ادخل تاني.{" "}
                   <a
                     className="text-brass underline"
-                    href="https://www.hik-connect.com/views/login/index.html#/login"
+                    href="https://www.hik-connect.com/views/login/index.html#/portal"
                     target="_blank"
                     rel="noreferrer"
                   >
