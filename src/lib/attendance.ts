@@ -87,6 +87,8 @@ export function aggregate(punches: Punch[], shiftStart = "08:00"): DayRow[] {
 
   for (const punch of punches) {
     if (!punch.date || !punch.time) continue;
+    const clock = padTime(punch.time);
+    if (clock.startsWith("00:00") || clock.startsWith("23:59")) continue;
     const key = `${punch.employeeNo || punch.name}|${punch.date}`;
     const list = groups.get(key);
     if (list) list.push(punch);

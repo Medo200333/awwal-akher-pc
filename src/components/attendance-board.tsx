@@ -381,6 +381,7 @@ export function AttendanceBoard() {
       let done = false;
       let guard = 0;
       let rosterCount = 0;
+      let reportNote = "";
       while (!done && guard < 30) {
         if (runRef.current !== id) return;
         guard += 1;
@@ -408,6 +409,7 @@ export function AttendanceBoard() {
         const directory = result.people?.length
           ? new Map(result.people.map((person) => [person.employeeNo, person.name]))
           : null;
+        if (result.notice) reportNote = result.notice;
         if (result.people?.length) {
           rosterCount = result.people.length;
           setRoster(result.people);
@@ -425,12 +427,12 @@ export function AttendanceBoard() {
         setSource("device");
       }
       if (!collected.length) {
-        say(rosterCount ? `اتسحب ${rosterCount} شخص من Person، ومفيش صفوف في First In Last Out للفترة دي.` : "مفيش صفوف في تقرير First In Last Out للفترة دي.");
+        say(reportNote || (rosterCount ? `اتسحب ${rosterCount} شخص من Person، ومفيش وقت بصمة غير الشيفت.` : "مفيش وقت بصمة. 00:00 و 23:59 دول الشيفت واتسابوا."));
         setPunches([]);
       } else if (!done) {
         say("اتسحب جزء من السجلات. قصّر الفترة لو محتاج الباقي.");
       } else {
-        say(`اتسحب ${collected.length} بصمة${rosterCount ? ` و${rosterCount} شخص` : ""} من موقع هيك-كونكت.`);
+        say(reportNote || `اتسحب ${collected.length} بصمة${rosterCount ? ` و${rosterCount} شخص` : ""} من موقع هيك-كونكت.`);
       }
     } catch {
       report("الاتصال انقطع أثناء السحب.");

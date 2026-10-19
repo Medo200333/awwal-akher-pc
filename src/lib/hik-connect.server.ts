@@ -35,7 +35,7 @@ export type CloudChunkRequest = {
 export type CloudPerson = { employeeNo: string; name: string; photo: string };
 
 export type CloudChunkResult =
-  | { ok: true; punches: Punch[]; pageIndex: number; done: boolean; people?: CloudPerson[] }
+  | { ok: true; punches: Punch[]; pageIndex: number; done: boolean; people?: CloudPerson[]; notice?: string }
   | { ok: false; error: string };
 
 function md5(value: string): string {
@@ -497,7 +497,7 @@ function menuNodes(value: unknown, into: MenuNode[] = []): MenuNode[] {
 function reportKind(node: MenuNode): "transaction" | "firstlast" | "" {
   const text = `${node.translatedName ?? ""} ${node.name ?? ""} ${node.componentName ?? ""}`.toLowerCase();
   if (text.includes("mobile")) return "";
-  if (/\btransaction\b/.test(text) || text.includes("original")) return "transaction";
+  if (/\btransaction\b/.test(text) || text.includes("original") || /\brecord\b/.test(text)) return "transaction";
   if (/first[\s_-]*in/.test(text) && /last/.test(text) && /out/.test(text)) return "firstlast";
   return "";
 }
@@ -529,12 +529,30 @@ function pictureUrl(info: Record<string, unknown>): string {
   return "";
 }
 
-function clockOf(value: string): string | null {
-  const match = /(?:^|[^\d])(\d{2}:\d{2})(?::(\d{2}))?/.exec(value);
-  if (!match) return null;
-  const hour = Number(match[1].slice(0, 2));
-  if (hour > 23) return null;
-  return `${match[1]}:${match[2] ?? "00"}`;
+function allClocks(value: string): string[] {
+  const clocks: string[] = [];
+  const pattern = /(?:^|[^\d])(\d{2}:\d{2})(?::(\d{2}))?/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(value))) {
+    const hour = Number(match[1].slice(0, 2));
+    const minute = Number(match[1].slice(3));
+    if (hour > 23 || minute > 59) continue;
+    clocks.push(`${match[1]}:${match[2] ?? "00"}`);
+  }
+  return clocks;
+}
+
+function shiftBound(clock: string): boolean {
+  return clock.startsWith("00:00") || clock.startsWith("23:59");
+}
+
+function cellText(value: unknown): string {
+  const plain = plainCell(value);
+  if (plain) return plain;
+  if (value && typeof value === "object") {
+    return Object.values(value as Record<string, unknown>).map((item) => plainCell(item)).filter(Boolean).join(" ");
+  }
+  return "";
 }
 
 function punchesFromReport(rows: unknown[], columns: Record<string, unknown>[]): Punch[] {
@@ -548,13 +566,13 @@ function punchesFromReport(rows: unknown[], columns: Record<string, unknown>[]):
         const name = plainCell(column.name);
         const id = plainCell(column.id);
         const label = `${plainCell(column.translatedName)} ${name} ${id}`.toLowerCase();
-        const value = plainCell(row[name] ?? (id ? row[id] : undefined));
+        const value = cellText(row[name] ?? (id ? row[id] : undefined));
         if (value) cells.push({ label, value });
       }
     }
     if (!cells.length) {
       for (const [key, value] of Object.entries(row)) {
-        const text = plainCell(value);
+        const text = cellText(value);
         if (text) cells.push({ label: key.toLowerCase(), value: text });
       }
     }
@@ -571,11 +589,10 @@ function punchesFromReport(rows: unknown[], columns: Record<string, unknown>[]):
       else if (/(^|\s)id$|person\s*code|employee|person\s*id/.test(cell.label)) employee = cell.value;
       const dateMatch = /(\d{4}-\d{2}-\d{2})/.exec(cell.value);
       if (!date && dateMatch && /date|day/.test(cell.label)) date = dateMatch[1];
-      const clock = clockOf(cell.value);
-      const shiftBound = clock === "00:00:00" || clock === "23:59:00" || clock === "23:59:59";
-      const skipLabel = /period|duration|hour|weekday|shift|valid|schedule|timetable|range|plan/.test(cell.label);
-      if (clock && !shiftBound && !skipLabel && /first|last|clock|check|time|in|out|transaction/.test(cell.label)) {
-        times.push(clock);
+      const skipLabel = /duration|hour|weekday|shift|valid|schedule|timetable|range|plan|period/.test(cell.label);
+      if (skipLabel) continue;
+      for (const clock of allClocks(cell.value)) {
+        if (!shiftBound(clock)) times.push(clock);
       }
     }
     if (!date) {
@@ -659,6 +676,54 @@ async function fetchPeople(base: string, sessionId: string): Promise<CloudPerson
   return found.map((person) => ({ employeeNo: person.employeeNo, name: person.name, photo: photos.get(person.employeeNo) ?? "" }));
 }
 
+async function openReport(base: string, headersForRead: Record<string, string>, reportTypeId: number) {
+  const head = await readBody(`${base}/hccattendance/ability/v1/report/${reportTypeId}/get`, {
+    method: "POST",
+    headers: headersForRead,
+    body: JSON.stringify({ language: "en" }),
+  });
+  if (portalError(head.json, head.status) || !head.json) return null;
+  const headBody = (head.json.data && typeof head.json.data === "object" ? head.json.data : head.json) as Record<string, unknown>;
+  return {
+    columns: Array.isArray(headBody.columnList) ? (headBody.columnList as Record<string, unknown>[]) : [],
+    filters: Array.isArray(headBody.filterList) ? (headBody.filterList as Record<string, unknown>[]) : [],
+  };
+}
+
+async function readReportPage(
+  base: string,
+  headersForRead: Record<string, string>,
+  reportTypeId: number,
+  page: number,
+  filters: Record<string, unknown>[],
+  range: string,
+): Promise<{ rows: unknown[]; error: string; noMore: boolean }> {
+  const filterList = filters.map((filter) => {
+    const columnName = plainCell(filter.target ?? filter.columnName);
+    const operation = plainCell(filter.operation) || "IN";
+    const inputType = Number(filter.inputType);
+    const dateFilter = inputType === 3 || inputType === 5 || /date|time/.test(columnName);
+    return { columnName, operation, value: dateFilter ? range : "" };
+  });
+  const result = await readBody(`${base}/hccattendance/report/v1/list`, {
+    method: "POST",
+    headers: headersForRead,
+    body: JSON.stringify({
+      page,
+      pageSize: PAGE_SIZE,
+      language: "en",
+      reportTypeId,
+      columnIdList: [],
+      filterList,
+    }),
+  });
+  const reason = portalError(result.json, result.status);
+  if (reason) return { rows: [], error: reason, noMore: true };
+  const body = (result.json?.data && typeof result.json.data === "object" ? result.json.data : result.json ?? {}) as Record<string, unknown>;
+  const rows = Array.isArray(body.reportDataList) ? body.reportDataList : [];
+  return { rows, error: "", noMore: body.nextPageExists === false };
+}
+
 async function pullFirstLastReport(base: string, input: CloudChunkRequest, offset: string): Promise<CloudChunkResult | null> {
   const headersForTeam = teamHeaders(input.sessionId);
   const menu = await readBody(`${base}/hccattendance/ability/v1/menu/list`, {
@@ -669,67 +734,58 @@ async function pullFirstLastReport(base: string, input: CloudChunkRequest, offse
   if (portalError(menu.json, menu.status) || !menu.json) return null;
   const payload = (menu.json.data && typeof menu.json.data === "object" ? menu.json.data : menu.json) as Record<string, unknown>;
   const nodes = menuNodes(payload.menuList ?? payload);
-  const transaction = nodes.find((node) => node.reportTypeId != null && node.reportTypeId >= 0 && reportKind(node) === "transaction");
-  const firstLast = nodes.find((node) => node.reportTypeId != null && node.reportTypeId >= 0 && reportKind(node) === "firstlast");
-  const report = transaction ?? firstLast;
-  if (!report || report.reportTypeId == null) {
+  const candidates = nodes
+    .filter((node) => node.reportTypeId != null && node.reportTypeId >= 0 && reportKind(node) !== "")
+    .sort((a, b) => (reportKind(a) === "transaction" ? -1 : 1) - (reportKind(b) === "transaction" ? -1 : 1));
+  if (!candidates.length) {
     const titles = nodes.map((node) => node.translatedName || node.name).filter(Boolean).slice(0, 8).join("، ");
-    return { ok: false, error: titles ? `مفيش تقرير First In Last Out. اللي ظاهر: ${titles}` : "مفيش تقرير First In Last Out في القائمة." };
+    return { ok: false, error: titles ? `مفيش تقرير الحضور. اللي ظاهر: ${titles}` : "مفيش تقرير الحضور في القائمة." };
   }
-  const head = await readBody(`${base}/hccattendance/ability/v1/report/${report.reportTypeId}/get`, {
-    method: "POST",
-    headers: headersForTeam,
-    body: JSON.stringify({ language: "en" }),
-  });
-  const headReason = portalError(head.json, head.status);
-  if (headReason) return { ok: false, error: headReason };
-  const headBody = (head.json?.data && typeof head.json.data === "object" ? head.json.data : head.json ?? {}) as Record<string, unknown>;
-  const filters = Array.isArray(headBody.filterList) ? (headBody.filterList as Record<string, unknown>[]) : [];
-  const columns = Array.isArray(headBody.columnList) ? (headBody.columnList as Record<string, unknown>[]) : [];
+  const headersForRead = headersForTeam;
   const ranges = [
     `${input.startDate}T00:00:00${offset},${input.endDate}T23:59:59${offset}`,
     `${input.startDate} 00:00:00,${input.endDate} 23:59:59`,
   ];
+  let report = candidates[0];
+  let columns: Record<string, unknown>[] = [];
+  let filters: Record<string, unknown>[] = [];
+  let range = ranges[0];
+  for (const candidate of candidates) {
+    const opened = await openReport(base, headersForRead, candidate.reportTypeId as number);
+    if (!opened) continue;
+    let sample = await readReportPage(base, headersForRead, candidate.reportTypeId as number, 1, opened.filters, ranges[0]);
+    let parsed = punchesFromReport(sample.rows, opened.columns);
+    if (!parsed.length) {
+      sample = await readReportPage(base, headersForRead, candidate.reportTypeId as number, 1, opened.filters, ranges[1]);
+      parsed = punchesFromReport(sample.rows, opened.columns);
+      if (parsed.length) range = ranges[1];
+    }
+    report = candidate;
+    columns = opened.columns;
+    filters = opened.filters;
+    if (parsed.length) break;
+  }
+  const title = report.translatedName || report.name || "الحضور";
   let page = Math.max(1, input.pageIndex || 1);
   const punches: Punch[] = [];
   let done = false;
-  let range = ranges[0];
   for (let step = 0; step < PAGES_PER_CALL && !done; step += 1) {
-    const filterList = filters.map((filter) => {
-      const columnName = plainCell(filter.target ?? filter.columnName);
-      const operation = plainCell(filter.operation) || "IN";
-      const inputType = Number(filter.inputType);
-      const dateFilter = inputType === 3 || inputType === 5 || /date|time/.test(columnName);
-      return { columnName, operation, value: dateFilter ? range : "" };
-    });
-    const result = await readBody(`${base}/hccattendance/report/v1/list`, {
-      method: "POST",
-      headers: headersForTeam,
-      body: JSON.stringify({
-        page,
-        pageSize: PAGE_SIZE,
-        language: "en",
-        reportTypeId: report.reportTypeId,
-        columnIdList: [],
-        filterList,
-      }),
-    });
-    const reason = portalError(result.json, result.status);
-    if (reason) return { ok: false, error: reason };
-    const body = (result.json?.data && typeof result.json.data === "object" ? result.json.data : result.json ?? {}) as Record<string, unknown>;
-    const rows = Array.isArray(body.reportDataList) ? body.reportDataList : [];
-    const parsed = punchesFromReport(rows, columns);
+    const loaded = await readReportPage(base, headersForRead, report.reportTypeId as number, page, filters, range);
+    if (loaded.error) return { ok: false, error: loaded.error };
+    const parsed = punchesFromReport(loaded.rows, columns);
     if (!parsed.length && !punches.length && step === 0 && range === ranges[0]) {
       range = ranges[1];
       step -= 1;
       continue;
     }
     punches.push(...parsed);
-    if (!rows.length || body.nextPageExists === false) done = true;
-    else done = rows.length < PAGE_SIZE;
+    done = !loaded.rows.length || loaded.noMore || loaded.rows.length < PAGE_SIZE;
     page += 1;
   }
-  return { ok: true, punches, pageIndex: page, done };
+  const notice = punches.length
+    ? `التقرير: ${title}. الأوقات 00:00 و 23:59 اتسابت لأنها الشيفت.`
+    : `تقرير ${title} رجّع مواعيد الشيفت بس (00:00–23:59) ومفيش وقت بصمة.`;
+  return { ok: true, punches, pageIndex: page, done, notice };
 }
 
 export async function hikPullChunk(input: CloudChunkRequest): Promise<CloudChunkResult> {
