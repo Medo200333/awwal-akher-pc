@@ -588,7 +588,7 @@ export function AttendanceBoard() {
       row.last,
       String(row.count),
       row.minutes == null ? "" : formatMinutes(row.minutes),
-      row.hours ?? "",
+      row.minutes == null ? "" : formatMinutes(row.minutes),
       row.status,
     ]);
     const keys = new Set(shown.map((row) => `${row.employeeNo}|${row.name}|${row.date}`));
@@ -621,9 +621,9 @@ export function AttendanceBoard() {
     URL.revokeObjectURL(url);
   }
 
-  function downloadPdf() {
-    document.title = `SKY LINE ${from} ${to}`;
-    window.print();
+  async function downloadPdf() {
+    const { saveAttendancePdf } = await import("../lib/sheet-pdf");
+    saveAttendancePdf(from, to, shown, roster);
   }
 
   async function enterGate() {
@@ -1035,7 +1035,7 @@ export function AttendanceBoard() {
                 disabled={!shown.length}
                 className="no-print inline-flex h-11 items-center justify-center gap-2 rounded-md border border-brass px-4 font-medium text-brass disabled:opacity-50"
               >
-                PDF
+                نزّل PDF
               </button>
               <button
                 type="button"
@@ -1297,7 +1297,7 @@ function WeekBoard({ rows, people }: { rows: DayRow[]; people: RosterPerson[] })
                                 <>
                                   <div className="royal-in">{cell.first}</div>
                                   <div className="royal-out">{cell.last || "—"}</div>
-                                  <div className="royal-hours">{cell.hours == null ? "" : `${cell.hours} h`}</div>
+                                  <div className="royal-hours">{cell.minutes == null ? "" : formatMinutes(cell.minutes)}</div>
                                   <div className="royal-status">{englishStatus(cell.status)}</div>
                                 </>
                               ) : (

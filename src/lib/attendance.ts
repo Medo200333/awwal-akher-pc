@@ -36,17 +36,20 @@ const DATE_HINTS = ["date", "تاريخ", "يوم"];
 const FIRST_HINTS = ["first", "check in", "check-in", "clock in", "on duty", "حضور", "اول", "أول", "دخول", "in time"];
 const LAST_HINTS = ["last", "check out", "check-out", "clock out", "off duty", "انصراف", "اخر", "آخر", "خروج", "out time"];
 
+export function formatMinutes(minutes: number | null): string {
+  if (minutes == null || minutes < 0) return "—";
+  const total = Math.max(1, minutes);
+  const hours = Math.floor(total / 60);
+  const mins = total % 60;
+  if (hours === 0) return `${mins} min`;
+  if (mins === 0) return `${hours} h`;
+  return `${hours} h ${mins} min`;
+}
+
 export function weekdayName(isoDate: string): string {
   const [y, m, d] = isoDate.split("-").map(Number);
   if (!y || !m || !d) return "";
   return WEEKDAYS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()] ?? "";
-}
-
-export function formatMinutes(minutes: number | null): string {
-  if (minutes == null || minutes < 0) return "—";
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  return `${h}:${String(m).padStart(2, "0")}`;
 }
 
 function padTime(raw: string): string {
@@ -109,7 +112,8 @@ export function aggregate(punches: Punch[], shiftStart = "08:00"): DayRow[] {
     const lastPunch = kept[kept.length - 1];
     const missingOut = kept.length < 2;
     const last = missingOut ? "" : lastPunch.time;
-    const minutes = missingOut ? null : Math.max(0, Math.round((toSeconds(last) - toSeconds(first.time)) / 60));
+    const rawMinutes = (toSeconds(last) - toSeconds(first.time)) / 60;
+    const minutes = missingOut ? null : Math.max(1, Math.ceil(rawMinutes - 1e-6));
     const late = toSeconds(first.time) > shift;
     const status = missingOut && late ? "متأخر · بصمة واحدة" : missingOut ? "بصمة واحدة" : late ? "متأخر" : "منتظم";
     const name = kept.find((item) => item.name)?.name || first.name || "بدون اسم";
