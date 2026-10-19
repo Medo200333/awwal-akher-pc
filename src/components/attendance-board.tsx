@@ -383,6 +383,7 @@ export function AttendanceBoard() {
             endDate: to,
             timeZone: "Africa/Cairo",
             pageIndex,
+            elementIds: teams.map((team) => team.id).filter(Boolean).join(","),
           },
         });
         if (runRef.current !== id) return;

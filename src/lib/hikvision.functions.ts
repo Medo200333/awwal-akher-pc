@@ -36,17 +36,19 @@ const cloudLoginSchema = z.object({
   account: z.string().trim().min(1).max(128),
   password: z.string().min(1).max(128),
   imageCode: z.string().trim().max(12).optional(),
+  smsCode: z.string().trim().max(12).optional(),
   featureCode: z.string().trim().max(64).optional(),
 });
 
 const cloudChunkSchema = z.object({
   apiBase: z.string().trim().min(8).max(160),
-  sessionId: z.string().trim().min(8).max(256),
+  sessionId: z.string().trim().min(8).max(4096),
   featureCode: z.string().trim().min(8).max(64),
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   timeZone: z.string().trim().min(1).max(64),
   pageIndex: z.number().int().min(1).max(500),
+  elementIds: z.string().trim().max(4000).optional(),
 });
 
 export type CloudLoginInput = z.infer<typeof cloudLoginSchema>;
@@ -56,7 +58,7 @@ export const hikLoginFn = createServerFn({ method: "POST" })
   .validator((data: CloudLoginInput) => cloudLoginSchema.parse(data))
   .handler(async ({ data }) => {
     const { hikLogin } = await import("./hik-connect.server");
-    return hikLogin(data.account, data.password, data.imageCode ?? "", data.featureCode ?? "");
+    return hikLogin(data.account, data.password, data.imageCode ?? "", data.featureCode ?? "", data.smsCode ?? "");
   });
 
 export const hikPullFn = createServerFn({ method: "POST" })

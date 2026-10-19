@@ -29,6 +29,7 @@ export type CloudChunkRequest = {
   endDate: string;
   timeZone: string;
   pageIndex: number;
+  elementIds?: string;
 };
 
 export type CloudChunkResult =
@@ -494,11 +495,10 @@ export async function hikPullChunk(input: CloudChunkRequest): Promise<CloudChunk
           endTime: `${input.endDate}T23:59:59${offset}`,
           type: 0,
           eventTypes: "",
-          elementIDs: "",
+          elementIDs: input.elementIds?.trim() || "",
           searchType: 0,
           cardNumber: "",
           personCondition: {},
-          alcoholStatus: 0,
         },
       };
       const result = await readBody(`${base}${path}`, {
