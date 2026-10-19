@@ -15,6 +15,7 @@ import {
 } from "@/lib/attendance";
 import { pullChunkFn, testDeviceFn, hikLoginFn, hikPullFn, openGateFn } from "@/lib/hikvision.functions";
 import { DeviceDesk, seedDevices, type DeskDevice } from "@/components/device-desk";
+import { HikGuide } from "@/components/hik-guide";
 import { buildXlsx, sheetRows } from "@/lib/xlsx-io";
 
 const STORAGE_KEY = "awwal-akher-link";
@@ -31,7 +32,7 @@ type SavedLink = {
   password?: string;
   remember: boolean;
   shift: string;
-  mode?: "cloud" | "direct";
+  mode?: "cloud" | "team" | "direct";
 };
 
 type Team = { id: string; name: string };
@@ -91,6 +92,7 @@ export function AttendanceBoard() {
   const errorRef = useRef("");
   const noteRef = useRef("دي بيانات مثال عشان تشوف شكل الشيت. اسحب من جهازك أو ارفع ملف.");
   const skipDeskSave = useRef(true);
+  const didAutoLogin = useRef(false);
 
   const [mode, setMode] = useState<"cloud" | "team" | "direct">("team");
   const [cloud, setCloud] = useState<{ apiBase: string; sessionId: string; featureCode: string } | null>(null);
@@ -107,6 +109,7 @@ export function AttendanceBoard() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(false);
+  const [ready, setReady] = useState(false);
   const [shift, setShift] = useState("08:00");
   const [from, setFrom] = useState("2026-10-11");
   const [to, setTo] = useState("2026-10-17");
@@ -125,9 +128,11 @@ export function AttendanceBoard() {
   const [gateOpen, setGateOpen] = useState(false);
   const [gateUser, setGateUser] = useState("");
   const [gatePass, setGatePass] = useState("");
+  const [gateRemember, setGateRemember] = useState(true);
   const [gateError, setGateError] = useState("");
   const [gateBusy, setGateBusy] = useState(false);
   const [board, setBoard] = useState<"list" | "transaction">("list");
+  const [guideOpen, setGuideOpen] = useState(false);
   const portal = mode !== "direct";
 
   function report(message: string) {
@@ -153,15 +158,31 @@ export function AttendanceBoard() {
       setRemember(Boolean(saved.remember));
       if (saved.remember && saved.password) setPassword(saved.password);
       if (saved.shift) setShift(saved.shift);
-      if (saved.mode === "direct" || saved.portal) setMode(saved.mode);
+      if (saved.mode === "direct" || saved.mode === "team" || saved.mode === "cloud") setMode(saved.mode);
+    }
+    try {
+      const gateRaw = localStorage.getItem("awwal-akher-gate");
+      if (gateRaw) {
+        const gate = JSON.parse(gateRaw) as { username?: string; password?: string };
+        if (gate.username) setGateUser(gate.username);
+        if (gate.password) setGatePass(gate.password);
+        if (gate.username && gate.password) {
+          sessionStorage.setItem("skyline-gate", "1");
+          setGateOpen(true);
+        }
+      }
+    } catch {
+      /* keep the login form */
     }
     const end = new Date();
     const start = new Date(end.getFullYear(), end.getMonth(), 1);
     setFrom(isoDay(start));
     setTo(isoDay(end));
+    setReady(true);
   }, []);
 
   useEffect(() => {
+    if (!ready) return;
     const payload: SavedLink = {
       host,
       port,
@@ -173,7 +194,7 @@ export function AttendanceBoard() {
       password: remember ? password : undefined,
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-  }, [host, port, https, username, password, remember, shift, mode]);
+  }, [ready, host, port, https, username, password, remember, shift, mode]);
 
   useEffect(() => {
     try {
@@ -313,6 +334,14 @@ export function AttendanceBoard() {
       setBusy(null);
     }
   }
+
+  useEffect(() => {
+    if (!ready || !gateOpen || didAutoLogin.current) return;
+    if (remember && username.trim() && password && mode !== "direct") {
+      didAutoLogin.current = true;
+      void onCloudLogin();
+    }
+  }, [ready, gateOpen]);
 
   async function onTest() {
     if (portal) {
@@ -636,6 +665,11 @@ export function AttendanceBoard() {
         return;
       }
       sessionStorage.setItem("skyline-gate", "1");
+      if (gateRemember) {
+        localStorage.setItem("awwal-akher-gate", JSON.stringify({ username: gateUser.trim(), password: gatePass }));
+      } else {
+        localStorage.removeItem("awwal-akher-gate");
+      }
       setGateOpen(true);
     } catch {
       setGateError("الدخول فشل. حاول تاني.");
@@ -667,6 +701,15 @@ export function AttendanceBoard() {
             <input className={fieldClass} dir="ltr" type="password" autoComplete="current-password" value={gatePass} onChange={(event) => setGatePass(event.target.value)} />
           </label>
           {gateError ? <p className="text-sm text-clay">{gateError}</p> : null}
+          <label className="flex min-h-11 items-center gap-3 text-sm text-muted">
+            <input
+              type="checkbox"
+              className="size-5 accent-brass"
+              checked={gateRemember}
+              onChange={(event) => setGateRemember(event.target.checked)}
+            />
+            احفظ اليوزر والباسورد على الجهاز ده
+          </label>
           <button type="submit" disabled={gateBusy} className="h-11 rounded-md bg-brass font-medium text-brass-ink disabled:opacity-50">
             {gateBusy ? "بندخل…" : "ادخل"}
           </button>
@@ -687,7 +730,12 @@ export function AttendanceBoard() {
             </div>
           </div>
           <p className="rounded-full border border-brass px-3 py-2 text-sm text-brass">{sourceText}</p>
+          <button type="button" onClick={() => setGuideOpen((open) => !open)} className="h-11 rounded-md border border-brass px-4 text-sm font-medium text-brass">
+            دليل الكونفيجريشن
+          </button>
         </header>
+
+        {guideOpen ? <HikGuide onClose={() => setGuideOpen(false)} /> : null}
 
         <div className="print-only print-head">
           <strong>SKY LINE</strong>
@@ -879,7 +927,7 @@ export function AttendanceBoard() {
                 checked={remember}
                 onChange={(event) => setRemember(event.target.checked)}
               />
-              احفظ كلمة السر على الجهاز ده بس
+              احفظ الحساب وكلمة السر، والمرة الجاية يدخل على هيك-كونكت تيم لوحده
             </label>
             <button
               type="button"
