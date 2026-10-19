@@ -731,7 +731,7 @@ export function AttendanceBoard() {
           </div>
           <p className="rounded-full border border-brass px-3 py-2 text-sm text-brass">{sourceText}</p>
           <button type="button" onClick={() => setGuideOpen((open) => !open)} className="h-11 rounded-md border border-brass px-4 text-sm font-medium text-brass">
-            دليل الكونفيجريشن
+            دليل الباك أب
           </button>
         </header>
 
