@@ -691,13 +691,13 @@ export function AttendanceBoard() {
 
         <div className="print-only print-head">
           <strong>SKY LINE</strong>
-          <span>تقرير الحضور · أول بصمة وآخر بصمة</span>
+          <span>Attendance · First in / Last out</span>
           <span dir="ltr">{from} — {to}</span>
         </div>
 
         {board === "transaction" && shown.length ? (
           <section className="rounded-lg border border-line bg-panel p-3 md:p-4">
-            <h2 className="no-print mb-3 text-lg font-semibold">جدول الأسبوع</h2>
+            <h2 className="no-print mb-3 text-lg font-semibold">Attendance</h2>
             <WeekBoard rows={shown} people={roster} />
           </section>
         ) : (
@@ -1207,17 +1207,25 @@ function plusDays(iso: string, count: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-const WEEK = ["السبت", "الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة"];
+const WEEK = ["Saturday", "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
 
 function splitName(name: string): { first: string; last: string } {
   const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length < 2) return { first: parts[0] || name, last: "—" };
+  if (parts.length < 2) return { first: parts[0] || name, last: "" };
   return { first: parts[0], last: parts.slice(1).join(" ") };
 }
 
 function dayMark(iso: string): string {
   const [, month, day] = iso.split("-");
   return `${Number(day)}/${Number(month)}`;
+}
+
+function englishStatus(status: string): string {
+  if (status.includes("بصمة") && status.includes("متأخر")) return "Late";
+  if (status.includes("بصمة")) return "One punch";
+  if (status.includes("متأخر")) return "Late";
+  if (status.includes("منتظم")) return "Present";
+  return status;
 }
 
 function WeekBoard({ rows, people }: { rows: DayRow[]; people: RosterPerson[] }) {
@@ -1237,7 +1245,7 @@ function WeekBoard({ rows, people }: { rows: DayRow[]; people: RosterPerson[] })
     return 2;
   };
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-8">
       {starts.map((start) => {
         const days = WEEK.map((_, index) => plusDays(start, index));
         const inWeek = weeks.get(start) ?? [];
@@ -1246,17 +1254,17 @@ function WeekBoard({ rows, people }: { rows: DayRow[]; people: RosterPerson[] })
         const ordered = [...names.values()].sort((a, b) => rank(a.employeeNo, a.name) - rank(b.employeeNo, b.name) || a.name.localeCompare(b.name));
         let lastRank = -1;
         return (
-          <div key={start} className="overflow-x-auto">
-            <table className="w-full min-w-[860px] border-collapse text-xs" dir="rtl">
+          <div key={start} className="overflow-x-auto rounded-md border-2 border-[#0c3d66]">
+            <table className="royal-sheet w-full min-w-[980px] border-collapse text-left" dir="ltr">
               <thead>
-                <tr className="bg-brass text-brass-ink">
-                  <th className="border border-line px-2 py-2 text-right font-medium">الصورة</th>
-                  <th className="border border-line px-2 py-2 text-right font-medium">الاسم الأول</th>
-                  <th className="border border-line px-2 py-2 text-right font-medium">الاسم الأخير</th>
+                <tr>
+                  <th>Photo</th>
+                  <th>First name</th>
+                  <th>Last name</th>
                   {days.map((date, index) => (
-                    <th key={date} className="border border-line px-1 py-2 text-center font-medium">
+                    <th key={date}>
                       <div>{WEEK[index]}</div>
-                      <div className="font-mono text-sm" dir="ltr">{dayMark(date)}</div>
+                      <div className="royal-date">{dayMark(date)}</div>
                     </th>
                   ))}
                 </tr>
@@ -1264,7 +1272,7 @@ function WeekBoard({ rows, people }: { rows: DayRow[]; people: RosterPerson[] })
               <tbody>
                 {ordered.map((person) => {
                   const group = rank(person.employeeNo, person.name);
-                  const label = group === 0 ? "رجال" : group === 1 ? "نساء" : "";
+                  const label = group === 0 ? "Male" : group === 1 ? "Female" : "";
                   const showLabel = label && group !== lastRank;
                   lastRank = group;
                   const parts = splitName(person.name);
@@ -1272,28 +1280,28 @@ function WeekBoard({ rows, people }: { rows: DayRow[]; people: RosterPerson[] })
                     <Fragment key={person.employeeNo || person.name}>
                       {showLabel ? (
                         <tr>
-                          <td colSpan={10} className="border border-line bg-panel-2 px-2 py-1 font-medium">{label}</td>
+                          <td colSpan={10} className="royal-band">{label}</td>
                         </tr>
                       ) : null}
                       <tr>
-                        <td className="border border-line bg-panel px-2 py-2">
+                        <td className="royal-photo">
                           <PersonFace people={people} employeeNo={person.employeeNo} name={person.name} />
                         </td>
-                        <td className="border border-line px-2 py-2 font-medium">{parts.first}</td>
-                        <td className="border border-line px-2 py-2">{parts.last}</td>
+                        <td className="royal-name">{parts.first}</td>
+                        <td className="royal-name">{parts.last}</td>
                         {days.map((date) => {
                           const cell = inWeek.find((row) => row.date === date && (row.employeeNo === person.employeeNo || row.name === person.name));
                           return (
-                            <td key={date} className="border border-line px-1 py-1 text-center">
+                            <td key={date} className="royal-cell">
                               {cell ? (
                                 <>
-                                  <div dir="ltr" className="font-mono">{cell.first}</div>
-                                  <div dir="ltr" className="font-mono">{cell.last || "—"}</div>
-                                  <div className="text-muted">{cell.hours == null ? "—" : `${cell.hours} س`}</div>
-                                  <div>{cell.status}</div>
+                                  <div className="royal-in">{cell.first}</div>
+                                  <div className="royal-out">{cell.last || "—"}</div>
+                                  <div className="royal-hours">{cell.hours == null ? "" : `${cell.hours} h`}</div>
+                                  <div className="royal-status">{englishStatus(cell.status)}</div>
                                 </>
                               ) : (
-                                "—"
+                                <span className="royal-empty">—</span>
                               )}
                             </td>
                           );
@@ -1303,11 +1311,9 @@ function WeekBoard({ rows, people }: { rows: DayRow[]; people: RosterPerson[] })
                   );
                 })}
               </tbody>
-              <tfoot className="print-foot">
+              <tfoot>
                 <tr>
-                  <td colSpan={10} className="border border-line bg-panel-2 px-3 py-2 text-sm">
-                    SKY LINE · أول خانة أول بصمة، التانية آخر بصمة، والتالتة المدة في الشركة
-                  </td>
+                  <td colSpan={10} className="royal-foot">SKY LINE · in · out · hours on site</td>
                 </tr>
               </tfoot>
             </table>

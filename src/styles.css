@@ -60,6 +60,102 @@
   flex: none;
 }
 
+.royal-sheet {
+  background: #ffffff;
+  color: #102433;
+  font-size: 13px;
+}
+
+.royal-sheet th {
+  background: #0c3d66;
+  color: #f4f7fb;
+  border: 1px solid #082840;
+  padding: 10px 8px;
+  text-align: center;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.royal-sheet td {
+  border: 1px solid #8ea3b5;
+  padding: 8px;
+  vertical-align: middle;
+  background: #ffffff;
+}
+
+.royal-sheet tbody tr:nth-child(even) td {
+  background: #f3f6f9;
+}
+
+.royal-date {
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  letter-spacing: 0;
+}
+
+.royal-band {
+  background: #d5dee7 !important;
+  color: #0c3d66;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  text-align: left;
+}
+
+.royal-photo {
+  width: 64px;
+  text-align: center;
+}
+
+.royal-name {
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.royal-cell {
+  text-align: center;
+  min-width: 76px;
+}
+
+.royal-in,
+.royal-out,
+.royal-hours,
+.royal-status {
+  font-family: var(--font-mono);
+  line-height: 1.35;
+}
+
+.royal-in {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0c3d66;
+}
+
+.royal-out {
+  font-size: 13px;
+}
+
+.royal-hours,
+.royal-status {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: #4d6273;
+}
+
+.royal-empty {
+  color: #8ea3b5;
+}
+
+.royal-foot {
+  background: #d5dee7 !important;
+  color: #1e2a35;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-align: left;
+}
+
 .print-only {
   display: none;
 }
@@ -77,16 +173,16 @@
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    background: #1565b5;
+    background: #0c3d66;
     color: white;
-    padding: 14px 18px;
-    font-size: 14px;
+    padding: 16px 20px;
+    font-size: 15px;
+    letter-spacing: 0.08em;
   }
 
-  .print-foot {
-    display: table-footer-group;
-    background: #d5dee7;
-    color: #1e2a35;
+  .print-head strong {
+    font-size: 22px;
+    letter-spacing: 0.18em;
   }
 
   body {
@@ -95,7 +191,7 @@
   }
 
   @page {
-    margin: 12mm;
+    margin: 10mm;
   }
 }
 
