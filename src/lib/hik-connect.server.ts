@@ -467,10 +467,24 @@ export async function hikPullChunk(input: CloudChunkRequest): Promise<CloudChunk
     if (days > 30) return { ok: false, error: "اقسم الفترة. كل سحبة لحد ٣١ يوم." };
     const base = assertPortal(input.apiBase);
     const feature = featureCode(input.featureCode);
+    const team = base.includes("hikcentralconnect.com");
     const offset = zoneOffset(input.timeZone || "Africa/Cairo", input.startDate);
     let page = Math.max(1, input.pageIndex || 1);
     const punches: Punch[] = [];
     let done = false;
+    const path = team
+      ? "/hccacs/v1/event/certificateRecords/search"
+      : "/customer/proxy/hccacs/v1/event/certificateRecords/search";
+    const callHeaders: Record<string, string> = team
+      ? {
+          clientSource: "0",
+          clientType: "48",
+          lang: "en-US",
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Cookie: `JSESSIONID=${input.sessionId}`,
+        }
+      : { ...headers(feature, input.sessionId), "Content-Type": "application/json" };
     for (let step = 0; step < PAGES_PER_CALL && !done; step += 1) {
       const body = {
         pageIndex: page,
@@ -487,9 +501,9 @@ export async function hikPullChunk(input: CloudChunkRequest): Promise<CloudChunk
           alcoholStatus: 0,
         },
       };
-      const result = await readBody(`${base}/customer/proxy/hccacs/v1/event/certificateRecords/search`, {
+      const result = await readBody(`${base}${path}`, {
         method: "POST",
-        headers: { ...headers(feature, input.sessionId), "Content-Type": "application/json" },
+        headers: callHeaders,
         body: JSON.stringify(body),
       });
       const reason = portalError(result.json, result.status);
