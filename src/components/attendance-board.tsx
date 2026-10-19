@@ -1031,15 +1031,22 @@ export function AttendanceBoard() {
             </p>
           </div>
           {roster.length ? (
-            <div className="mt-4 flex gap-3 overflow-x-auto pb-2">
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
               {roster.map((person) => (
-                <div key={person.employeeNo} className="flex w-20 shrink-0 flex-col items-center gap-1 text-center">
+                <div key={person.employeeNo} className="flex items-center gap-3 rounded-lg border border-line bg-canvas p-3">
                   {person.photo ? (
-                    <img src={person.photo} alt="" className="size-12 rounded-full object-cover" />
+                    <img src={person.photo} alt="" className="size-16 rounded-full object-cover" />
                   ) : (
-                    <span className="flex size-12 items-center justify-center rounded-full bg-panel-2 text-xs text-muted">بدون</span>
+                    <span className="flex size-16 shrink-0 items-center justify-center rounded-full bg-brass text-lg font-semibold text-brass-ink">
+                      {(person.name || "?").trim().slice(0, 1).toUpperCase()}
+                    </span>
                   )}
-                  <span className="line-clamp-2 text-xs">{person.name}</span>
+                  <div>
+                    <p className="font-medium">{person.name}</p>
+                    <p className="text-sm text-muted">
+                      <Ltr>{person.employeeNo}</Ltr>
+                    </p>
+                  </div>
                 </div>
               ))}
             </div>

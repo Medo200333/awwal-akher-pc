@@ -14,23 +14,23 @@
   --font-sans: "IBM Plex Sans Arabic", "Segoe UI", tahoma, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
 
-  --color-canvas: #111111;
-  --color-panel: #1a1a1a;
-  --color-panel-2: #242424;
-  --color-ink: #f7f7f5;
-  --color-muted: #b5b5b0;
-  --color-faint: #8a8a84;
-  --color-line: #333330;
-  --color-brass: #ff6a00;
-  --color-brass-ink: #1a0d00;
-  --color-clay: #e10600;
-  --color-desk: #141414;
-  --color-desk-head: #2a2a2a;
+  --color-canvas: #e6eaee;
+  --color-panel: #f4f6f8;
+  --color-panel-2: #dde3e8;
+  --color-ink: #1e2a35;
+  --color-muted: #5c6b78;
+  --color-faint: #7d8b96;
+  --color-line: #c5ced6;
+  --color-brass: #1565b5;
+  --color-brass-ink: #ffffff;
+  --color-clay: #c0392b;
+  --color-desk: #f7f8fa;
+  --color-desk-head: #d5dee7;
 }
 
 @layer base {
   html {
-    color-scheme: dark;
+    color-scheme: light;
   }
 
   body {

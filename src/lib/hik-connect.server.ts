@@ -614,57 +614,114 @@ function punchesFromReport(rows: unknown[], columns: Record<string, unknown>[]):
 }
 
 async function photoData(base: string, sessionId: string, url: string): Promise<string> {
-  const target = url.startsWith("/") ? `${new URL(base).origin}${url}` : url;
+  const origin = new URL(base).origin;
+  const target = url.startsWith("//") ? `https:${url}` : url.startsWith("/") ? `${origin}${url}` : url;
   if (!target.startsWith("https://")) return "";
   try {
     const response = await fetch(target, {
-      headers: { Cookie: `JSESSIONID=${sessionId}`, Referer: `${new URL(base).origin}/` },
-      signal: AbortSignal.timeout(5000),
+      headers: { ...teamHeaders(sessionId), Referer: `${origin}/` },
+      signal: AbortSignal.timeout(8000),
     });
     if (!response.ok) return "";
-    const type = (response.headers.get("content-type") ?? "").split(";")[0];
-    if (!type.startsWith("image/")) return "";
     const bytes = Buffer.from(await response.arrayBuffer());
-    if (bytes.length < 80 || bytes.length > 180_000) return "";
+    if (bytes.length < 30 || bytes.length > 500_000) return "";
+    let type = (response.headers.get("content-type") ?? "").split(";")[0];
+    if (!type.startsWith("image/")) {
+      if (bytes[0] === 0xff && bytes[1] === 0xd8) type = "image/jpeg";
+      else if (bytes[0] === 0x89 && bytes[1] === 0x50) type = "image/png";
+      else return "";
+    }
     return `data:${type};base64,${bytes.toString("base64")}`;
   } catch {
     return "";
   }
 }
 
+function readPersonList(json: Record<string, unknown> | null): Record<string, unknown>[] {
+  if (!json) return [];
+  const body = (json.data && typeof json.data === "object" ? json.data : json) as Record<string, unknown>;
+  const response = (body.personResponse && typeof body.personResponse === "object" ? body.personResponse : body) as Record<string, unknown>;
+  const list = response.personList ?? response.list ?? body.personList;
+  return Array.isArray(list) ? (list as Record<string, unknown>[]) : [];
+}
+
+async function personPhotoUrl(base: string, sessionId: string, id: string): Promise<string> {
+  if (!id) return "";
+  const result = await readBody(`${base}/ccfperson/v2/persons/${encodeURIComponent(id)}/search`, {
+    method: "POST",
+    headers: teamHeaders(sessionId),
+    body: JSON.stringify({ personRequest: { field: "fullPath,HeadPic", additionalInfoField: "1,53,57" } }),
+  });
+  if (portalError(result.json, result.status) || !result.json) return "";
+  const body = (result.json.data && typeof result.json.data === "object" ? result.json.data : result.json) as Record<string, unknown>;
+  const info = (body.personInfo && typeof body.personInfo === "object" ? body.personInfo : body) as Record<string, unknown>;
+  return pictureUrl(info) || plainCell(info.headPicUrl) || plainCell(info.faceUrl);
+}
+
 async function fetchPeople(base: string, sessionId: string): Promise<CloudPerson[]> {
-  const found: { employeeNo: string; name: string; url: string }[] = [];
-  for (let page = 1; page <= 4 && found.length < 80; page += 1) {
-    const result = await readBody(`${base}/ccfperson/v1/persons/search`, {
-      method: "POST",
-      headers: teamHeaders(sessionId),
-      body: JSON.stringify({
-        pageSize: 100,
-        pageIndex: page,
-        responseMode: 0,
-        productId: "3",
-        field: "FullPath,HeadPic",
-        searchCriteria: { logicalOperation: 1 },
-      }),
-    });
-    if (portalError(result.json, result.status) || !result.json) break;
-    const body = (result.json.data && typeof result.json.data === "object" ? result.json.data : result.json) as Record<string, unknown>;
-    const response = (body.personResponse && typeof body.personResponse === "object" ? body.personResponse : body) as Record<string, unknown>;
-    const list = Array.isArray(response.personList) ? response.personList : [];
-    for (const item of list) {
-      if (!item || typeof item !== "object") continue;
-      const info = ((item as Record<string, unknown>).personInfo ?? item) as Record<string, unknown>;
-      const name = plainCell(info.fullName) || [plainCell(info.firstName), plainCell(info.lastName)].filter(Boolean).join(" ");
-      const employeeNo = plainCell(info.personCode ?? info.employeeNo ?? info.id);
-      if (!name && !employeeNo) continue;
-      found.push({ employeeNo: employeeNo || name, name: name || employeeNo, url: pictureUrl(info) });
-    }
-    if (list.length < 100) break;
+  const found: { id: string; employeeNo: string; name: string; url: string }[] = [];
+  const seen = new Set<string>();
+  const criteriaList: Record<string, unknown>[] = [
+    { personName: { fullName: "" }, personCode: "", logicalOperation: 1 },
+    { personGroup: { groupId: "1" }, personName: { fullName: "" }, personCode: "", logicalOperation: 1 },
+  ];
+  const groups = await readBody(`${base}/ccfperson/v1/groups/search`, {
+    method: "POST",
+    headers: teamHeaders(sessionId),
+    body: JSON.stringify({ personGroupSearchRequest: { depthTraversal: true } }),
+  });
+  const groupBody = (groups.json?.data && typeof groups.json.data === "object" ? groups.json.data : groups.json ?? {}) as Record<string, unknown>;
+  const groupList = Array.isArray(groupBody.personGroupList) ? groupBody.personGroupList : [];
+  for (const group of groupList.slice(0, 6)) {
+    if (!group || typeof group !== "object") continue;
+    const id = plainCell((group as Record<string, unknown>).id ?? (group as Record<string, unknown>).groupId);
+    if (id) criteriaList.push({ personGroup: { groupId: id }, logicalOperation: 1 });
   }
-  const withPhoto = found.slice(0, 24).filter((person) => person.url);
-  const photos = new Map<string, string>();
+  for (const searchCriteria of criteriaList) {
+    if (found.length) break;
+    for (let page = 1; page <= 4 && found.length < 80; page += 1) {
+      const result = await readBody(`${base}/ccfperson/v1/persons/search`, {
+        method: "POST",
+        headers: teamHeaders(sessionId),
+        body: JSON.stringify({
+          pageSize: 100,
+          pageIndex: page,
+          responseMode: 0,
+          productId: "3",
+          field: "FullPath",
+          searchCriteria,
+        }),
+      });
+      const list = readPersonList(result.json);
+      if (portalError(result.json, result.status) || !list.length) break;
+      for (const item of list) {
+        const info = (item.personInfo && typeof item.personInfo === "object" ? item.personInfo : item) as Record<string, unknown>;
+        const name = plainCell(info.fullName) || [plainCell(info.firstName), plainCell(info.lastName)].filter(Boolean).join(" ");
+        const employeeNo = plainCell(info.personCode ?? info.employeeNo ?? item.personCode);
+        const id = plainCell(info.id ?? item.id);
+        const key = employeeNo || id || name;
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        const url = pictureUrl(info) || plainCell(info.faceUrl) || plainCell(item.faceUrl) || plainCell(info.headPicUrl);
+        found.push({ id, employeeNo: employeeNo || name, name: name || employeeNo, url });
+      }
+      if (list.length < 100) break;
+    }
+  }
+  const missing = found.filter((person) => person.id && !person.url).slice(0, 40);
   let cursor = 0;
-  async function worker() {
+  async function fillUrl() {
+    while (cursor < missing.length) {
+      const person = missing[cursor];
+      cursor += 1;
+      person.url = await personPhotoUrl(base, sessionId, person.id);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(6, missing.length) }, () => fillUrl()));
+  const withPhoto = found.filter((person) => person.url).slice(0, 40);
+  const photos = new Map<string, string>();
+  cursor = 0;
+  async function download() {
     while (cursor < withPhoto.length) {
       const person = withPhoto[cursor];
       cursor += 1;
@@ -672,7 +729,7 @@ async function fetchPeople(base: string, sessionId: string): Promise<CloudPerson
       if (photo) photos.set(person.employeeNo, photo);
     }
   }
-  await Promise.all(Array.from({ length: Math.min(6, withPhoto.length) }, () => worker()));
+  await Promise.all(Array.from({ length: Math.min(6, withPhoto.length) }, () => download()));
   return found.map((person) => ({ employeeNo: person.employeeNo, name: person.name, photo: photos.get(person.employeeNo) ?? "" }));
 }
 
