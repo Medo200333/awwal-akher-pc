@@ -19,7 +19,7 @@ import { buildXlsx, sheetRows } from "@/lib/xlsx-io";
 const STORAGE_KEY = "awwal-akher-link";
 const DESK_KEY = "awwal-akher-desk";
 
-type Source = "demo" | "device" | "file";
+type RosterPerson = { employeeNo: string; name: string; photo: string };
 
 type SavedLink = {
   host: string;
@@ -108,7 +108,7 @@ export function AttendanceBoard() {
   const [from, setFrom] = useState("2026-10-11");
   const [to, setTo] = useState("2026-10-17");
   const [punches, setPunches] = useState<Punch[]>(() => demoPunches());
-  const [source, setSource] = useState<Source>("demo");
+  const [roster, setRoster] = useState<RosterPerson[]>([]);
   const [deviceLabel, setDeviceLabel] = useState("");
   const [query, setQuery] = useState("");
   const [problemsOnly, setProblemsOnly] = useState(false);
@@ -370,6 +370,7 @@ export function AttendanceBoard() {
       let pageIndex = 1;
       let done = false;
       let guard = 0;
+      let rosterCount = 0;
       while (!done && guard < 30) {
         if (runRef.current !== id) return;
         guard += 1;
@@ -394,7 +395,19 @@ export function AttendanceBoard() {
           }
           return;
         }
-        collected.push(...result.punches);
+        const directory = result.people?.length
+          ? new Map(result.people.map((person) => [person.employeeNo, person.name]))
+          : null;
+        if (result.people?.length) {
+          rosterCount = result.people.length;
+          setRoster(result.people);
+        }
+        const batch = directory ? applyNames(result.punches, directory) : result.punches;
+        if (directory && collected.length) {
+          const named = applyNames(collected, directory);
+          collected.splice(0, collected.length, ...named);
+        }
+        collected.push(...batch);
         pageIndex = result.pageIndex;
         done = result.done;
         setProgress(collected.length);
@@ -402,12 +415,12 @@ export function AttendanceBoard() {
         setSource("device");
       }
       if (!collected.length) {
-        say("مفيش صفوف في تقرير First In Last Out للفترة دي.");
+        say(rosterCount ? `اتسحب ${rosterCount} شخص من Person، ومفيش صفوف في First In Last Out للفترة دي.` : "مفيش صفوف في تقرير First In Last Out للفترة دي.");
         setPunches([]);
       } else if (!done) {
         say("اتسحب جزء من السجلات. قصّر الفترة لو محتاج الباقي.");
       } else {
-        say(`اتسحب ${collected.length} بصمة من موقع هيك-كونكت.`);
+        say(`اتسحب ${collected.length} بصمة${rosterCount ? ` و${rosterCount} شخص` : ""} من موقع هيك-كونكت.`);
       }
     } catch {
       report("الاتصال انقطع أثناء السحب.");
@@ -923,6 +936,20 @@ export function AttendanceBoard() {
             </div>
           </div>
 
+          {roster.length ? (
+            <div className="mt-4 flex gap-3 overflow-x-auto pb-2">
+              {roster.map((person) => (
+                <div key={person.employeeNo} className="flex w-20 shrink-0 flex-col items-center gap-1 text-center">
+                  {person.photo ? (
+                    <img src={person.photo} alt="" className="size-12 rounded-full object-cover" />
+                  ) : (
+                    <span className="flex size-12 items-center justify-center rounded-full bg-panel-2 text-xs text-muted">بدون</span>
+                  )}
+                  <span className="line-clamp-2 text-xs">{person.name}</span>
+                </div>
+              ))}
+            </div>
+          ) : null}
           {shown.length === 0 ? (
             <p className="py-10 text-center text-muted">مفيش صفوف مطابقة.</p>
           ) : (
@@ -931,14 +958,17 @@ export function AttendanceBoard() {
                 {shown.map((row) => (
                   <li key={`${row.employeeNo}-${row.date}-${row.name}`} className="rounded-lg border border-line bg-canvas p-4">
                     <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="font-medium">{row.name}</p>
-                        <p className="text-sm text-muted">
-                          <Ltr>{row.employeeNo}</Ltr>
-                          <span> · </span>
-                          <Ltr>{row.date}</Ltr>
-                          <span> · {row.weekday}</span>
-                        </p>
+                      <div className="flex items-center gap-3">
+                        <PersonFace people={roster} employeeNo={row.employeeNo} name={row.name} />
+                        <div>
+                          <p className="font-medium">{row.name}</p>
+                          <p className="text-sm text-muted">
+                            <Ltr>{row.employeeNo}</Ltr>
+                            <span> · </span>
+                            <Ltr>{row.date}</Ltr>
+                            <span> · {row.weekday}</span>
+                          </p>
+                        </div>
                       </div>
                       <Status text={row.status} bad={row.late || row.missingOut} />
                     </div>
@@ -980,7 +1010,12 @@ export function AttendanceBoard() {
                   <tbody>
                     {shown.map((row) => (
                       <tr key={`${row.employeeNo}-${row.date}-${row.name}`} className="border-b border-line">
-                        <td className="px-2 py-3">{row.name}</td>
+                        <td className="px-2 py-3">
+                          <span className="flex items-center gap-2">
+                            <PersonFace people={roster} employeeNo={row.employeeNo} name={row.name} />
+                            {row.name}
+                          </span>
+                        </td>
                         <td className="px-2 py-3">
                           <Ltr mono>{row.employeeNo}</Ltr>
                         </td>
@@ -1024,4 +1059,10 @@ function Stat({ label, value, warn = false }: { label: string; value: string; wa
 
 function Status({ text, bad }: { text: string; bad: boolean }) {
   return <span className={bad ? "text-clay" : "text-brass"}>{text}</span>;
+}
+
+function PersonFace({ people, employeeNo, name }: { people: RosterPerson[]; employeeNo: string; name: string }) {
+  const person = people.find((item) => item.employeeNo === employeeNo || item.name === name);
+  if (!person?.photo) return null;
+  return <img src={person.photo} alt="" className="size-9 rounded-full object-cover" />;
 }

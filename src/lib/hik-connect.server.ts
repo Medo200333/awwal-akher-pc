@@ -32,8 +32,10 @@ export type CloudChunkRequest = {
   elementIds?: string;
 };
 
+export type CloudPerson = { employeeNo: string; name: string; photo: string };
+
 export type CloudChunkResult =
-  | { ok: true; punches: Punch[]; pageIndex: number; done: boolean }
+  | { ok: true; punches: Punch[]; pageIndex: number; done: boolean; people?: CloudPerson[] }
   | { ok: false; error: string };
 
 function md5(value: string): string {
@@ -573,6 +575,69 @@ function punchesFromReport(rows: unknown[], columns: Record<string, unknown>[]):
   return punches;
 }
 
+async function photoData(base: string, sessionId: string, url: string): Promise<string> {
+  const target = url.startsWith("/") ? `${new URL(base).origin}${url}` : url;
+  if (!target.startsWith("https://")) return "";
+  try {
+    const response = await fetch(target, {
+      headers: { Cookie: `JSESSIONID=${sessionId}`, Referer: `${new URL(base).origin}/` },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!response.ok) return "";
+    const type = (response.headers.get("content-type") ?? "").split(";")[0];
+    if (!type.startsWith("image/")) return "";
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.length < 80 || bytes.length > 180_000) return "";
+    return `data:${type};base64,${bytes.toString("base64")}`;
+  } catch {
+    return "";
+  }
+}
+
+async function fetchPeople(base: string, sessionId: string): Promise<CloudPerson[]> {
+  const found: { employeeNo: string; name: string; url: string }[] = [];
+  for (let page = 1; page <= 4 && found.length < 80; page += 1) {
+    const result = await readBody(`${base}/ccfperson/v1/persons/search`, {
+      method: "POST",
+      headers: teamHeaders(sessionId),
+      body: JSON.stringify({
+        pageSize: 100,
+        pageIndex: page,
+        responseMode: 0,
+        productId: "3",
+        field: "FullPath,HeadPic",
+        searchCriteria: { logicalOperation: 1 },
+      }),
+    });
+    if (portalError(result.json, result.status) || !result.json) break;
+    const body = (result.json.data && typeof result.json.data === "object" ? result.json.data : result.json) as Record<string, unknown>;
+    const response = (body.personResponse && typeof body.personResponse === "object" ? body.personResponse : body) as Record<string, unknown>;
+    const list = Array.isArray(response.personList) ? response.personList : [];
+    for (const item of list) {
+      if (!item || typeof item !== "object") continue;
+      const info = ((item as Record<string, unknown>).personInfo ?? item) as Record<string, unknown>;
+      const name = plainCell(info.fullName) || [plainCell(info.firstName), plainCell(info.lastName)].filter(Boolean).join(" ");
+      const employeeNo = plainCell(info.personCode ?? info.employeeNo ?? info.id);
+      if (!name && !employeeNo) continue;
+      found.push({ employeeNo: employeeNo || name, name: name || employeeNo, url: plainCell(info.headPicUrl) });
+    }
+    if (list.length < 100) break;
+  }
+  const withPhoto = found.slice(0, 24).filter((person) => person.url);
+  const photos = new Map<string, string>();
+  let cursor = 0;
+  async function worker() {
+    while (cursor < withPhoto.length) {
+      const person = withPhoto[cursor];
+      cursor += 1;
+      const photo = await photoData(base, sessionId, person.url);
+      if (photo) photos.set(person.employeeNo, photo);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(6, withPhoto.length) }, () => worker()));
+  return found.map((person) => ({ employeeNo: person.employeeNo, name: person.name, photo: photos.get(person.employeeNo) ?? "" }));
+}
+
 async function pullFirstLastReport(base: string, input: CloudChunkRequest, offset: string): Promise<CloudChunkResult | null> {
   const headersForTeam = teamHeaders(input.sessionId);
   const menu = await readBody(`${base}/hccattendance/ability/v1/menu/list`, {
@@ -654,7 +719,9 @@ export async function hikPullChunk(input: CloudChunkRequest): Promise<CloudChunk
     const team = base.includes("hikcentralconnect.com");
     const offset = zoneOffset(input.timeZone || "Africa/Cairo", input.startDate);
     if (team) {
+      const people = input.pageIndex <= 1 ? await fetchPeople(base, input.sessionId) : [];
       const report = await pullFirstLastReport(base, input, offset);
+      if (report?.ok) return { ...report, people };
       if (report) return report;
     }
     let page = Math.max(1, input.pageIndex || 1);
