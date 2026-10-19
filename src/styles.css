@@ -1,0 +1,67 @@
+@import "tailwindcss";
+@import "@fontsource/ibm-plex-sans-arabic/arabic-400.css";
+@import "@fontsource/ibm-plex-sans-arabic/arabic-500.css";
+@import "@fontsource/ibm-plex-sans-arabic/arabic-600.css";
+@import "@fontsource/ibm-plex-sans-arabic/arabic-700.css";
+@import "@fontsource/ibm-plex-sans-arabic/latin-400.css";
+@import "@fontsource/ibm-plex-sans-arabic/latin-500.css";
+@import "@fontsource/ibm-plex-sans-arabic/latin-600.css";
+@import "@fontsource/ibm-plex-sans-arabic/latin-700.css";
+@import "@fontsource/ibm-plex-mono/latin-500.css";
+@import "@fontsource/ibm-plex-mono/latin-600.css";
+
+@theme {
+  --font-sans: "IBM Plex Sans Arabic", "Segoe UI", tahoma, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  --color-canvas: #12110e;
+  --color-panel: #211e19;
+  --color-panel-2: #2c2822;
+  --color-ink: #f3ecdf;
+  --color-muted: #a89884;
+  --color-faint: #7c7164;
+  --color-line: #3d362c;
+  --color-brass: #e0b15a;
+  --color-brass-ink: #1c1408;
+  --color-clay: #d46a4c;
+  --color-desk: #16110d;
+  --color-desk-head: #3c3226;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    line-height: 1.5;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+.desk-status {
+  display: grid;
+  width: 12.5rem;
+  flex: none;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: start;
+  text-align: center;
+}
+
+.desk-actions {
+  width: 7rem;
+  flex: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
+  }
+}
