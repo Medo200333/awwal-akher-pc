@@ -87,6 +87,8 @@ if (-not (Test-Path -LiteralPath $ts)) {
 }
 
 Write-Host "Publishing on Tailscale Funnel..."
+& $ts funnel --https=443 off 2>$null | Out-Null
+Start-Sleep -Seconds 1
 & $ts funnel --bg 8080
 if ($LASTEXITCODE -ne 0) {
   Write-Host "Funnel is not enabled. Publishing inside the Tailscale network only."
