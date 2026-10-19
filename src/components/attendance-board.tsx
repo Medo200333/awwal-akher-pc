@@ -19,6 +19,7 @@ import { buildXlsx, sheetRows } from "@/lib/xlsx-io";
 const STORAGE_KEY = "awwal-akher-link";
 const DESK_KEY = "awwal-akher-desk";
 
+type Source = "demo" | "device" | "file";
 type RosterPerson = { employeeNo: string; name: string; photo: string };
 
 type SavedLink = {
@@ -108,6 +109,7 @@ export function AttendanceBoard() {
   const [from, setFrom] = useState("2026-10-11");
   const [to, setTo] = useState("2026-10-17");
   const [punches, setPunches] = useState<Punch[]>(() => demoPunches());
+  const [source, setSource] = useState<Source>("demo");
   const [roster, setRoster] = useState<RosterPerson[]>([]);
   const [deviceLabel, setDeviceLabel] = useState("");
   const [query, setQuery] = useState("");
