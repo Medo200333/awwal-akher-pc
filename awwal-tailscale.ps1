@@ -16,6 +16,7 @@ function Test-AppPort {
 $busy = @(Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue)
 if ($busy.Count -gt 0) {
   Write-Host "Stopping the old app."
+  schtasks /End /TN "AwwalAkherDev" 2>$null | Out-Null
   $busy | ForEach-Object {
     if ($_.OwningProcess -gt 0) {
       Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue
@@ -30,22 +31,27 @@ if ($busy.Count -gt 0) {
 Set-Content -LiteralPath $runner -Encoding ASCII -Value @"
 @echo off
 cd /d C:\awwal-akher
-npm run dev >> C:\Users\Public\awwal-dev.log 2>&1
+:again
+echo ---- start %DATE% %TIME% ---- >> C:\Users\Public\awwal-dev.log
+call npm run dev >> C:\Users\Public\awwal-dev.log 2>&1
+echo ---- exit %ERRORLEVEL% %DATE% %TIME% ---- >> C:\Users\Public\awwal-dev.log
+ping -n 4 127.0.0.1 >nul
+goto again
 "@
 
 if (Test-Path $log) { Remove-Item $log -Force }
 Write-Host "Starting the app outside the SSH session..."
-& schtasks /Create /TN "AwwalAkherDev" /TR $runner /SC ONCE /ST 00:00 /F /RL LIMITED | Out-Null
-& schtasks /Run /TN "AwwalAkherDev" | Out-Null
+$action = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c C:\Users\Public\awwal-run.cmd"
+$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1)
+$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+Register-ScheduledTask -TaskName "AwwalAkherDev" -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
+Start-ScheduledTask -TaskName "AwwalAkherDev"
 
 $ready = $false
 for ($i = 0; $i -lt 40; $i++) {
   Start-Sleep -Seconds 2
   if (Test-AppPort) {
     $ready = $true
-    break
-  }
-  if ((Test-Path $log) -and (Select-String -Path $log -Pattern "error|Error|EADDRINUSE|ENOENT" -Quiet)) {
     break
   }
 }
