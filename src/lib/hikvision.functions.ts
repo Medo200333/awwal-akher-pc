@@ -69,6 +69,18 @@ export const hikPullFn = createServerFn({ method: "POST" })
     return hikPullChunk(data);
   });
 
+const mapSchema = z.object({
+  apiBase: z.string().trim().min(8).max(160),
+  sessionId: z.string().trim().min(8).max(4096),
+});
+
+export const hikMapFn = createServerFn({ method: "POST" })
+  .validator((data: { apiBase: string; sessionId: string }) => mapSchema.parse(data))
+  .handler(async ({ data }) => {
+    const { hikReadMap } = await import("./hik-connect.server");
+    return hikReadMap(data.apiBase, data.sessionId);
+  });
+
 export const pullChunkFn = createServerFn({ method: "POST" })
   .validator((data: ChunkInput) => chunkSchema.parse(data))
   .handler(async ({ data }) => {

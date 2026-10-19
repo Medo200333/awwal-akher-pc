@@ -16,6 +16,7 @@ import {
 import { pullChunkFn, testDeviceFn, hikLoginFn, hikPullFn, openGateFn } from "@/lib/hikvision.functions";
 import { DeviceDesk, seedDevices, type DeskDevice } from "@/components/device-desk";
 import { HikGuide } from "@/components/hik-guide";
+import { TeamEngine } from "@/components/team-engine";
 import { buildXlsx, sheetRows } from "@/lib/xlsx-io";
 
 const STORAGE_KEY = "awwal-akher-link";
@@ -960,6 +961,7 @@ export function AttendanceBoard() {
                 {notice || `الدخول تم. ${deviceLabel}`}
               </p>
             ) : null}
+            {portal && cloud ? <TeamEngine apiBase={cloud.apiBase} sessionId={cloud.sessionId} /> : null}
             <p className="text-sm leading-relaxed text-faint">
               {portal ? (
                 <>

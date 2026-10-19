@@ -935,3 +935,159 @@ export async function hikPullChunk(input: CloudChunkRequest): Promise<CloudChunk
     return { ok: false, error: message || "السحب من موقع هيك-كونكت فشل." };
   }
 }
+
+export type TeamButton = {
+  key: string;
+  ar: string;
+  en: string;
+  meaning: string;
+  found: boolean;
+  path: string;
+  count: number;
+  names: string[];
+};
+
+export type TeamMapResult =
+  | { ok: true; stamp: string; fingerprint: string; buttons: TeamButton[] }
+  | { ok: false; error: string };
+
+const TEAM_BUTTONS: {
+  key: string;
+  ar: string;
+  en: string;
+  meaning: string;
+  keys: string[];
+  probes: { path: string; body: Record<string, unknown> }[];
+}[] = [
+  {
+    key: "area",
+    ar: "المنطقة",
+    en: "Area",
+    meaning: "بتجمع الأجهزة والناس. منطقة واحدة يعني الكل يبصم من أي جهاز فيها. كل فرع منطقة يعني الموظف ينزل على أجهزة فرعه بس.",
+    keys: ["areaName", "name"],
+    probes: [
+      { path: "/ccfres/v1/logicalresource/area/search", body: { pageIndex: 1, pageSize: 200 } },
+      { path: "/ccfarea/v1/area/search", body: { pageIndex: 1, pageSize: 200 } },
+    ],
+  },
+  {
+    key: "department",
+    ar: "القسم",
+    en: "Department",
+    meaning: "تجميع الموظفين. القسم يتربط بمنطقة عشان المدير يشوف ناس القسم بتاعه.",
+    keys: ["groupName", "name"],
+    probes: [{ path: "/ccfperson/v1/groups/search", body: { personGroupSearchRequest: { depthTraversal: true } } }],
+  },
+  {
+    key: "person",
+    ar: "الأشخاص",
+    en: "Person",
+    meaning: "الموظف. رقم الشخص على التيم لازم يفضل نفس الرقم على الجهاز، وإلا البصمات ما تتجمعش.",
+    keys: ["fullName"],
+    probes: [
+      {
+        path: "/ccfperson/v1/persons/search",
+        body: {
+          pageSize: 100,
+          pageIndex: 1,
+          responseMode: 0,
+          productId: "3",
+          field: "FullPath",
+          searchCriteria: { personName: { fullName: "" }, logicalOperation: 1 },
+        },
+      },
+    ],
+  },
+  {
+    key: "device",
+    ar: "الأجهزة",
+    en: "Device",
+    meaning: "البصمة أو كنترول الباب. بيتضاف بالسيريال وكود التحقق جوه المنطقة.",
+    keys: ["deviceName", "alias"],
+    probes: [
+      { path: "/ccfres/v1/devices/search", body: { pageIndex: 1, pageSize: 100 } },
+      { path: "/resource/v1/devices/search", body: { pageIndex: 1, pageSize: 100 } },
+    ],
+  },
+  {
+    key: "access",
+    ar: "مستوى الوصول",
+    en: "Access level",
+    meaning: "بيقول الشخص يدخل أنهي باب وفي أي وقت. من غيره الجهاز أونلاين والشخص مش ظاهر عليه.",
+    keys: ["accessLevelName", "name"],
+    probes: [
+      { path: "/acspm/v1/accesslevel/list", body: { pageIndex: 1, pageSize: 100 } },
+      { path: "/hccacs/v1/accesslevel/search", body: { pageIndex: 1, pageSize: 100 } },
+    ],
+  },
+  {
+    key: "report",
+    ar: "تقارير الحضور",
+    en: "Attendance",
+    meaning: "Transaction هو كل البصمات الخام. First in و Last out أول وآخر وقت. لو مدى الوردية ضيق التقرير يطلع فاضي.",
+    keys: ["translatedName", "name"],
+    probes: [{ path: "/hccattendance/ability/v1/menu/list", body: {} }],
+  },
+];
+
+function namedValues(value: unknown, keys: string[], into: string[] = [], depth = 0): string[] {
+  if (!value || depth > 7 || into.length > 60) return into;
+  if (Array.isArray(value)) {
+    for (const item of value) namedValues(item, keys, into, depth + 1);
+    return into;
+  }
+  if (typeof value !== "object") return into;
+  const row = value as Record<string, unknown>;
+  for (const key of keys) {
+    const cell = row[key];
+    if (typeof cell === "string" && cell.trim().length > 1) into.push(cell.trim());
+  }
+  for (const cell of Object.values(row)) {
+    if (cell && typeof cell === "object") namedValues(cell, keys, into, depth + 1);
+  }
+  return into;
+}
+
+function payloadOpened(json: Record<string, unknown> | null, status: number): boolean {
+  if (!json || portalError(json, status)) return false;
+  const code = metaCode(json);
+  return json.errorCode === "0" || code === 200 || code === 0 || json.data != null;
+}
+
+export async function hikReadMap(apiBase: string, sessionId: string): Promise<TeamMapResult> {
+  try {
+    const base = assertPortal(apiBase);
+    const buttons: TeamButton[] = [];
+    for (const spec of TEAM_BUTTONS) {
+      let foundPath = "";
+      let names: string[] = [];
+      for (const probe of spec.probes) {
+        const result = await readBody(`${base}${probe.path}`, {
+          method: "POST",
+          headers: teamHeaders(sessionId),
+          body: JSON.stringify(probe.body),
+        });
+        if (!payloadOpened(result.json, result.status)) continue;
+        foundPath = probe.path;
+        names = [...new Set(namedValues(result.json, spec.keys))].slice(0, 24);
+        break;
+      }
+      buttons.push({
+        key: spec.key,
+        ar: spec.ar,
+        en: spec.en,
+        meaning: spec.meaning,
+        found: Boolean(foundPath),
+        path: foundPath,
+        count: names.length,
+        names,
+      });
+    }
+    const fingerprint = buttons.map((button) => `${button.key}:${button.path}:${button.count}:${button.names.join("|")}`).join(";");
+    return { ok: true, stamp: new Date().toISOString(), fingerprint, buttons };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (/timeout|abort/i.test(message)) return { ok: false, error: "الموقع ما ردش. ادخل تاني وبعدين اقرأ التيم." };
+    return { ok: false, error: message || "قراءة التيم فشلت." };
+  }
+}
