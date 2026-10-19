@@ -33,7 +33,7 @@ export type CloudChunkRequest = {
   kind?: "transaction";
 };
 
-export type CloudPerson = { employeeNo: string; name: string; photo: string };
+export type CloudPerson = { employeeNo: string; name: string; photo: string; gender: string };
 
 export type CloudChunkResult =
   | { ok: true; punches: Punch[]; pageIndex: number; done: boolean; people?: CloudPerson[]; notice?: string }
@@ -514,6 +514,13 @@ function plainCell(value: unknown): string {
   return "";
 }
 
+function genderOf(info: Record<string, unknown>): string {
+  const raw = plainCell(info.gender ?? info.sex ?? info.personGender).toLowerCase();
+  if (raw === "1" || raw === "male" || raw === "m" || raw.includes("ذكر")) return "male";
+  if (raw === "2" || raw === "female" || raw === "f" || raw.includes("انث") || raw.includes("أنث")) return "female";
+  return "";
+}
+
 function pictureUrl(info: Record<string, unknown>): string {
   const direct = plainCell(info.headPicUrl || info.photoUrl || info.faceUrl || info.smallPicUrl);
   if (direct) return direct;
@@ -660,7 +667,7 @@ async function personPhotoUrl(base: string, sessionId: string, id: string): Prom
 }
 
 async function fetchPeople(base: string, sessionId: string): Promise<CloudPerson[]> {
-  const found: { id: string; employeeNo: string; name: string; url: string }[] = [];
+  const found: { id: string; employeeNo: string; name: string; url: string; gender: string }[] = [];
   const seen = new Set<string>();
   const criteriaList: Record<string, unknown>[] = [
     { personName: { fullName: "" }, personCode: "", logicalOperation: 1 },
@@ -704,7 +711,7 @@ async function fetchPeople(base: string, sessionId: string): Promise<CloudPerson
         if (!key || seen.has(key)) continue;
         seen.add(key);
         const url = pictureUrl(info) || plainCell(info.faceUrl) || plainCell(item.faceUrl) || plainCell(info.headPicUrl);
-        found.push({ id, employeeNo: employeeNo || name, name: name || employeeNo, url });
+        found.push({ id, employeeNo: employeeNo || name, name: name || employeeNo, url, gender: genderOf(info) });
       }
       if (list.length < 100) break;
     }
@@ -731,7 +738,12 @@ async function fetchPeople(base: string, sessionId: string): Promise<CloudPerson
     }
   }
   await Promise.all(Array.from({ length: Math.min(6, withPhoto.length) }, () => download()));
-  return found.map((person) => ({ employeeNo: person.employeeNo, name: person.name, photo: photos.get(person.employeeNo) ?? "" }));
+  return found.map((person) => ({
+    employeeNo: person.employeeNo,
+    name: person.name,
+    photo: photos.get(person.employeeNo) ?? "",
+    gender: person.gender,
+  }));
 }
 
 async function openReport(base: string, headersForRead: Record<string, string>, reportTypeId: number) {

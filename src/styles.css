@@ -60,14 +60,42 @@
   flex: none;
 }
 
+.print-only {
+  display: none;
+}
+
 @media print {
   .no-print {
     display: none !important;
   }
 
+  .print-only {
+    display: flex;
+  }
+
+  .print-head {
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    background: #1565b5;
+    color: white;
+    padding: 14px 18px;
+    font-size: 14px;
+  }
+
+  .print-foot {
+    display: table-footer-group;
+    background: #d5dee7;
+    color: #1e2a35;
+  }
+
   body {
     background: white;
     color: black;
+  }
+
+  @page {
+    margin: 12mm;
   }
 }
 

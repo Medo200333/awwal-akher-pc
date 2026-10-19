@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { Download, Fingerprint, LoaderCircle, Search, Upload } from "lucide-react";
 import {
@@ -21,7 +21,7 @@ const STORAGE_KEY = "awwal-akher-link";
 const DESK_KEY = "awwal-akher-desk";
 
 type Source = "demo" | "device" | "file";
-type RosterPerson = { employeeNo: string; name: string; photo: string };
+type RosterPerson = { employeeNo: string; name: string; photo: string; gender?: string };
 
 type SavedLink = {
   host: string;
@@ -689,20 +689,33 @@ export function AttendanceBoard() {
           <p className="rounded-full border border-brass px-3 py-2 text-sm text-brass">{sourceText}</p>
         </header>
 
-        <div className="no-print">
-        <DeviceDesk
-          devices={devices}
-          busy={busy !== null}
-          linkOpen={linkOpen}
-          numbers={numbers}
-          onTest={(id) => void testRow(id)}
-          onPull={(id) => void pullRow(id)}
-          onSync={(id) => void pullRow(id)}
-          onLink={(id) => setLinkOpen((current) => (current === id ? "" : id))}
-          onSetTime={setClock}
-          onStopDaily={stopDaily}
-        />
+        <div className="print-only print-head">
+          <strong>SKY LINE</strong>
+          <span>تقرير الحضور · أول بصمة وآخر بصمة</span>
+          <span dir="ltr">{from} — {to}</span>
         </div>
+
+        {board === "transaction" && shown.length ? (
+          <section className="rounded-lg border border-line bg-panel p-3 md:p-4">
+            <h2 className="no-print mb-3 text-lg font-semibold">جدول الأسبوع</h2>
+            <WeekBoard rows={shown} people={roster} />
+          </section>
+        ) : (
+          <div className="no-print">
+            <DeviceDesk
+              devices={devices}
+              busy={busy !== null}
+              linkOpen={linkOpen}
+              numbers={numbers}
+              onTest={(id) => void testRow(id)}
+              onPull={(id) => void pullRow(id)}
+              onSync={(id) => void pullRow(id)}
+              onLink={(id) => setLinkOpen((current) => (current === id ? "" : id))}
+              onSetTime={setClock}
+              onStopDaily={stopDaily}
+            />
+          </div>
+        )}
 
         <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
           <Stat label="الأشخاص" value={String(people)} />
@@ -1067,7 +1080,6 @@ export function AttendanceBoard() {
             <p className="py-10 text-center text-muted">مفيش صفوف مطابقة.</p>
           ) : (
             <>
-              {board === "transaction" ? <WeekBoard rows={shown} people={roster} /> : null}
               <ul className={board === "transaction" ? "hidden" : "mt-4 flex flex-col gap-3"}>
                 {shown.map((row) => (
                   <li key={`${row.employeeNo}-${row.date}-${row.name}`} className="rounded-lg border border-line bg-canvas p-4">
@@ -1197,6 +1209,17 @@ function plusDays(iso: string, count: number): string {
 
 const WEEK = ["السبت", "الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة"];
 
+function splitName(name: string): { first: string; last: string } {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length < 2) return { first: parts[0] || name, last: "—" };
+  return { first: parts[0], last: parts.slice(1).join(" ") };
+}
+
+function dayMark(iso: string): string {
+  const [, month, day] = iso.split("-");
+  return `${Number(day)}/${Number(month)}`;
+}
+
 function WeekBoard({ rows, people }: { rows: DayRow[]; people: RosterPerson[] }) {
   const weeks = new Map<string, DayRow[]>();
   for (const row of rows) {
@@ -1207,57 +1230,86 @@ function WeekBoard({ rows, people }: { rows: DayRow[]; people: RosterPerson[] })
   }
   const starts = [...weeks.keys()].sort();
   if (!starts.length) return null;
+  const rank = (employeeNo: string, name: string) => {
+    const person = people.find((item) => item.employeeNo === employeeNo || item.name === name);
+    if (person?.gender === "male") return 0;
+    if (person?.gender === "female") return 1;
+    return 2;
+  };
   return (
-    <div className="mt-4 flex flex-col gap-6">
+    <div className="flex flex-col gap-6">
       {starts.map((start) => {
         const days = WEEK.map((_, index) => plusDays(start, index));
         const inWeek = weeks.get(start) ?? [];
         const names = new Map<string, { employeeNo: string; name: string }>();
         for (const row of inWeek) names.set(row.employeeNo || row.name, { employeeNo: row.employeeNo, name: row.name });
+        const ordered = [...names.values()].sort((a, b) => rank(a.employeeNo, a.name) - rank(b.employeeNo, b.name) || a.name.localeCompare(b.name));
+        let lastRank = -1;
         return (
           <div key={start} className="overflow-x-auto">
-            <table className="w-full min-w-[760px] border-collapse text-sm" dir="rtl">
+            <table className="w-full min-w-[860px] border-collapse text-xs" dir="rtl">
               <thead>
                 <tr className="bg-brass text-brass-ink">
-                  <th className="border border-line px-3 py-2 text-right font-medium">الشخص</th>
+                  <th className="border border-line px-2 py-2 text-right font-medium">الصورة</th>
+                  <th className="border border-line px-2 py-2 text-right font-medium">الاسم الأول</th>
+                  <th className="border border-line px-2 py-2 text-right font-medium">الاسم الأخير</th>
                   {days.map((date, index) => (
-                    <th key={date} className="border border-line px-2 py-2 text-center font-medium">
+                    <th key={date} className="border border-line px-1 py-2 text-center font-medium">
                       <div>{WEEK[index]}</div>
-                      <div className="font-mono text-xs" dir="ltr">{date.slice(5)}</div>
+                      <div className="font-mono text-sm" dir="ltr">{dayMark(date)}</div>
                     </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {[...names.values()].map((person) => (
-                  <tr key={person.employeeNo || person.name}>
-                    <td className="border border-line bg-panel px-3 py-2">
-                      <span className="flex items-center justify-end gap-2">
-                        <span>
-                          <span className="block font-medium">{person.name}</span>
-                          <span className="block text-xs text-muted" dir="ltr">{person.employeeNo}</span>
-                        </span>
-                        <PersonFace people={people} employeeNo={person.employeeNo} name={person.name} />
-                      </span>
-                    </td>
-                    {days.map((date) => {
-                      const cell = inWeek.find((row) => row.date === date && (row.employeeNo === person.employeeNo || row.name === person.name));
-                      return (
-                        <td key={date} className="border border-line px-2 py-2 text-center">
-                          {cell ? (
-                            <>
-                              <div dir="ltr" className="font-mono">{cell.first}</div>
-                              <div dir="ltr" className="font-mono text-muted">{cell.last || "—"}</div>
-                            </>
-                          ) : (
-                            "—"
-                          )}
+                {ordered.map((person) => {
+                  const group = rank(person.employeeNo, person.name);
+                  const label = group === 0 ? "رجال" : group === 1 ? "نساء" : "";
+                  const showLabel = label && group !== lastRank;
+                  lastRank = group;
+                  const parts = splitName(person.name);
+                  return (
+                    <Fragment key={person.employeeNo || person.name}>
+                      {showLabel ? (
+                        <tr>
+                          <td colSpan={10} className="border border-line bg-panel-2 px-2 py-1 font-medium">{label}</td>
+                        </tr>
+                      ) : null}
+                      <tr>
+                        <td className="border border-line bg-panel px-2 py-2">
+                          <PersonFace people={people} employeeNo={person.employeeNo} name={person.name} />
                         </td>
-                      );
-                    })}
-                  </tr>
-                ))}
+                        <td className="border border-line px-2 py-2 font-medium">{parts.first}</td>
+                        <td className="border border-line px-2 py-2">{parts.last}</td>
+                        {days.map((date) => {
+                          const cell = inWeek.find((row) => row.date === date && (row.employeeNo === person.employeeNo || row.name === person.name));
+                          return (
+                            <td key={date} className="border border-line px-1 py-1 text-center">
+                              {cell ? (
+                                <>
+                                  <div dir="ltr" className="font-mono">{cell.first}</div>
+                                  <div dir="ltr" className="font-mono">{cell.last || "—"}</div>
+                                  <div className="text-muted">{cell.hours == null ? "—" : `${cell.hours} س`}</div>
+                                  <div>{cell.status}</div>
+                                </>
+                              ) : (
+                                "—"
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    </Fragment>
+                  );
+                })}
               </tbody>
+              <tfoot className="print-foot">
+                <tr>
+                  <td colSpan={10} className="border border-line bg-panel-2 px-3 py-2 text-sm">
+                    SKY LINE · أول خانة أول بصمة، التانية آخر بصمة، والتالتة المدة في الشركة
+                  </td>
+                </tr>
+              </tfoot>
             </table>
           </div>
         );
