@@ -461,15 +461,202 @@ function portalError(json: Record<string, unknown> | null, status: number): stri
   return "";
 }
 
+function teamHeaders(sessionId: string): Record<string, string> {
+  return {
+    clientSource: "0",
+    clientType: "48",
+    lang: "en-US",
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    Cookie: `JSESSIONID=${sessionId}`,
+  };
+}
+
+type MenuNode = {
+  translatedName?: string;
+  name?: string;
+  componentName?: string;
+  reportTypeId?: number;
+  children?: MenuNode[];
+};
+
+function menuNodes(value: unknown, into: MenuNode[] = []): MenuNode[] {
+  if (!value || typeof value !== "object") return into;
+  if (Array.isArray(value)) {
+    for (const item of value) menuNodes(item, into);
+    return into;
+  }
+  const node = value as MenuNode;
+  if (node.translatedName || node.name || node.reportTypeId != null) into.push(node);
+  if (Array.isArray(node.children)) menuNodes(node.children, into);
+  return into;
+}
+
+function isFirstLastReport(node: MenuNode): boolean {
+  const text = `${node.translatedName ?? ""} ${node.name ?? ""} ${node.componentName ?? ""}`.toLowerCase();
+  return /first[\s_-]*in[\s_-]*last[\s_-]*out/.test(text) || (text.includes("first") && text.includes("last") && text.includes("out"));
+}
+
+function plainCell(value: unknown): string {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>;
+    if ("value" in record) return plainCell(record.value);
+    if ("text" in record) return plainCell(record.text);
+  }
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return "";
+}
+
+function clockOf(value: string): string | null {
+  const match = /(?:^|[^\d])(\d{2}:\d{2})(?::(\d{2}))?/.exec(value);
+  if (!match) return null;
+  const hour = Number(match[1].slice(0, 2));
+  if (hour > 23) return null;
+  return `${match[1]}:${match[2] ?? "00"}`;
+}
+
+function punchesFromReport(rows: unknown[], columns: Record<string, unknown>[]): Punch[] {
+  const punches: Punch[] = [];
+  for (const item of rows) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const row = item as Record<string, unknown>;
+    const cells: { label: string; value: string }[] = [];
+    if (columns.length) {
+      for (const column of columns) {
+        const name = plainCell(column.name);
+        const id = plainCell(column.id);
+        const label = `${plainCell(column.translatedName)} ${name} ${id}`.toLowerCase();
+        const value = plainCell(row[name] ?? (id ? row[id] : undefined));
+        if (value) cells.push({ label, value });
+      }
+    }
+    if (!cells.length) {
+      for (const [key, value] of Object.entries(row)) {
+        const text = plainCell(value);
+        if (text) cells.push({ label: key.toLowerCase(), value: text });
+      }
+    }
+    let firstName = "";
+    let lastName = "";
+    let fullName = "";
+    let employee = "";
+    let date = "";
+    const times: string[] = [];
+    for (const cell of cells) {
+      if (/first\s*name/.test(cell.label)) firstName = cell.value;
+      else if (/last\s*name|family/.test(cell.label)) lastName = cell.value;
+      else if (/(^| )name$|full\s*name|person\s*name/.test(cell.label) && !/device|depart/.test(cell.label)) fullName = cell.value;
+      else if (/(^|\s)id$|person\s*code|employee|person\s*id/.test(cell.label)) employee = cell.value;
+      const dateMatch = /(\d{4}-\d{2}-\d{2})/.exec(cell.value);
+      if (!date && dateMatch && /date|day/.test(cell.label)) date = dateMatch[1];
+      const clock = clockOf(cell.value);
+      if (clock && /first|last|clock|check|time|in|out/.test(cell.label) && !/period|duration|hour|weekday/.test(cell.label)) {
+        times.push(clock);
+      }
+    }
+    if (!date) {
+      for (const cell of cells) {
+        const dateMatch = /(\d{4}-\d{2}-\d{2})/.exec(cell.value);
+        if (dateMatch) {
+          date = dateMatch[1];
+          break;
+        }
+      }
+    }
+    const name = fullName || [firstName, lastName].filter(Boolean).join(" ");
+    if (!name || !date || !times.length) continue;
+    for (const time of times) {
+      punches.push({ employeeNo: employee || name, name, date, time, method: "بصمة" });
+    }
+  }
+  return punches;
+}
+
+async function pullFirstLastReport(base: string, input: CloudChunkRequest, offset: string): Promise<CloudChunkResult | null> {
+  const headersForTeam = teamHeaders(input.sessionId);
+  const menu = await readBody(`${base}/hccattendance/ability/v1/menu/list`, {
+    method: "POST",
+    headers: headersForTeam,
+    body: JSON.stringify({ language: "en" }),
+  });
+  if (portalError(menu.json, menu.status) || !menu.json) return null;
+  const payload = (menu.json.data && typeof menu.json.data === "object" ? menu.json.data : menu.json) as Record<string, unknown>;
+  const nodes = menuNodes(payload.menuList ?? payload);
+  const report = nodes.find((node) => node.reportTypeId != null && node.reportTypeId >= 0 && isFirstLastReport(node));
+  if (!report || report.reportTypeId == null) {
+    const titles = nodes.map((node) => node.translatedName || node.name).filter(Boolean).slice(0, 8).join("، ");
+    return { ok: false, error: titles ? `مفيش تقرير First In Last Out. اللي ظاهر: ${titles}` : "مفيش تقرير First In Last Out في القائمة." };
+  }
+  const head = await readBody(`${base}/hccattendance/ability/v1/report/${report.reportTypeId}/get`, {
+    method: "POST",
+    headers: headersForTeam,
+    body: JSON.stringify({ language: "en" }),
+  });
+  const headReason = portalError(head.json, head.status);
+  if (headReason) return { ok: false, error: headReason };
+  const headBody = (head.json?.data && typeof head.json.data === "object" ? head.json.data : head.json ?? {}) as Record<string, unknown>;
+  const filters = Array.isArray(headBody.filterList) ? (headBody.filterList as Record<string, unknown>[]) : [];
+  const columns = Array.isArray(headBody.columnList) ? (headBody.columnList as Record<string, unknown>[]) : [];
+  const ranges = [
+    `${input.startDate}T00:00:00${offset},${input.endDate}T23:59:59${offset}`,
+    `${input.startDate} 00:00:00,${input.endDate} 23:59:59`,
+  ];
+  let page = Math.max(1, input.pageIndex || 1);
+  const punches: Punch[] = [];
+  let done = false;
+  let range = ranges[0];
+  for (let step = 0; step < PAGES_PER_CALL && !done; step += 1) {
+    const filterList = filters.map((filter) => {
+      const columnName = plainCell(filter.target ?? filter.columnName);
+      const operation = plainCell(filter.operation) || "IN";
+      const inputType = Number(filter.inputType);
+      const dateFilter = inputType === 3 || inputType === 5 || /date|time/.test(columnName);
+      return { columnName, operation, value: dateFilter ? range : "" };
+    });
+    const result = await readBody(`${base}/hccattendance/report/v1/list`, {
+      method: "POST",
+      headers: headersForTeam,
+      body: JSON.stringify({
+        page,
+        pageSize: PAGE_SIZE,
+        language: "en",
+        reportTypeId: report.reportTypeId,
+        columnIdList: [],
+        filterList,
+      }),
+    });
+    const reason = portalError(result.json, result.status);
+    if (reason) return { ok: false, error: reason };
+    const body = (result.json?.data && typeof result.json.data === "object" ? result.json.data : result.json ?? {}) as Record<string, unknown>;
+    const rows = Array.isArray(body.reportDataList) ? body.reportDataList : [];
+    const parsed = punchesFromReport(rows, columns);
+    if (!parsed.length && !punches.length && step === 0 && range === ranges[0]) {
+      range = ranges[1];
+      step -= 1;
+      continue;
+    }
+    punches.push(...parsed);
+    if (!rows.length || body.nextPageExists === false) done = true;
+    else done = rows.length < PAGE_SIZE;
+    page += 1;
+  }
+  return { ok: true, punches, pageIndex: page, done };
+}
+
 export async function hikPullChunk(input: CloudChunkRequest): Promise<CloudChunkResult> {
   try {
     const days = (Date.parse(`${input.endDate}T00:00:00Z`) - Date.parse(`${input.startDate}T00:00:00Z`)) / 86_400_000;
     if (days < 0) return { ok: false, error: "تاريخ النهاية قبل البداية." };
-    if (days > 30) return { ok: false, error: "اقسم الفترة. كل سحبة لحد ٣١ يوم." };
+    if (days > 40) return { ok: false, error: "اقسم الفترة. كل سحبة لحد ٤٠ يوم." };
     const base = assertPortal(input.apiBase);
     const feature = featureCode(input.featureCode);
     const team = base.includes("hikcentralconnect.com");
     const offset = zoneOffset(input.timeZone || "Africa/Cairo", input.startDate);
+    if (team) {
+      const report = await pullFirstLastReport(base, input, offset);
+      if (report) return report;
+    }
     let page = Math.max(1, input.pageIndex || 1);
     const punches: Punch[] = [];
     let done = false;

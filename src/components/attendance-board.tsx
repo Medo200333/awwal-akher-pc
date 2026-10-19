@@ -144,8 +144,7 @@ export function AttendanceBoard() {
       if (saved.mode === "direct" || saved.mode === "cloud") setMode(saved.mode);
     }
     const end = new Date();
-    const start = new Date();
-    start.setDate(end.getDate() - 6);
+    const start = new Date(end.getFullYear(), end.getMonth(), 1);
     setFrom(isoDay(start));
     setTo(isoDay(end));
   }, []);
@@ -403,7 +402,7 @@ export function AttendanceBoard() {
         setSource("device");
       }
       if (!collected.length) {
-        say("مفيش بصمات في الفترة دي على الموقع.");
+        say("مفيش صفوف في تقرير First In Last Out للفترة دي.");
         setPunches([]);
       } else if (!done) {
         say("اتسحب جزء من السجلات. قصّر الفترة لو محتاج الباقي.");
