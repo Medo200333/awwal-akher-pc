@@ -608,33 +608,40 @@ export function AttendanceBoard() {
   }
 
   function downloadExcel() {
-    const summary = shown.map((row) => [
-      row.employeeNo,
-      row.name,
-      row.date,
-      row.weekday,
-      row.first,
-      row.last,
-      String(row.count),
-      row.minutes == null ? "" : formatMinutes(row.minutes),
-      row.minutes == null ? "" : formatMinutes(row.minutes),
-      row.status,
-    ]);
-    const keys = new Set(shown.map((row) => `${row.employeeNo}|${row.name}|${row.date}`));
-    const raw = punches
-      .filter((punch) => keys.has(`${punch.employeeNo}|${punch.name}|${punch.date}`))
-      .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time) || a.name.localeCompare(b.name, "ar"))
-      .map((punch) => [punch.employeeNo, punch.name, punch.date, punch.time.slice(0, 5), punch.method]);
+    const weeks = new Map<string, DayRow[]>();
+    for (const row of shown) {
+      const start = saturdayOf(row.date);
+      const list = weeks.get(start);
+      if (list) list.push(row);
+      else weeks.set(start, [row]);
+    }
+    const rows: string[][] = [["SKY LINE", `Attendance  ${from} - ${to}`]];
+    for (const start of [...weeks.keys()].sort()) {
+      const days = WEEK.map((_, index) => plusDays(start, index));
+      const inWeek = weeks.get(start) ?? [];
+      const people = new Map<string, { employeeNo: string; name: string }>();
+      for (const row of inWeek) people.set(row.employeeNo || row.name, { employeeNo: row.employeeNo, name: row.name });
+      rows.push(["First name", "Last name", ...days.map((date, index) => `${WEEK[index]}\n${dayMark(date)}`)]);
+      for (const person of [...people.values()].sort((a, b) => a.name.localeCompare(b.name))) {
+        const parts = splitName(person.name);
+        rows.push([
+          parts.first,
+          parts.last,
+          ...days.map((date) => {
+            const cell = inWeek.find((row) => row.date === date && (row.employeeNo === person.employeeNo || row.name === person.name));
+            if (!cell) return "—";
+            return [cell.first, cell.last || "—", formatMinutes(cell.minutes)].join("\n");
+          }),
+        ]);
+      }
+      rows.push([]);
+    }
     const bytes = buildXlsx([
       {
-        name: "الحضور",
-        widths: [14, 24, 14, 12, 12, 12, 14, 12, 12, 18],
-        rows: [["الرقم", "الاسم", "التاريخ", "اليوم", "أول بصمة", "آخر بصمة", "عدد البصمات", "المدة", "الساعات", "الحالة"], ...summary],
-      },
-      {
-        name: "البصمات",
-        widths: [14, 24, 14, 12, 18],
-        rows: [["الرقم", "الاسم", "التاريخ", "الوقت", "الطريقة"], ...raw],
+        name: "Attendance",
+        ltr: true,
+        widths: [18, 18, 16, 16, 16, 16, 16, 16, 16],
+        rows,
       },
     ]);
     const copy = new Uint8Array(bytes.byteLength);
@@ -643,7 +650,7 @@ export function AttendanceBoard() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `حضور-اول-واخر-${from}_${to}.xlsx`;
+    link.download = `SKY-LINE-${from}_${to}.xlsx`;
     document.body.appendChild(link);
     link.click();
     link.remove();

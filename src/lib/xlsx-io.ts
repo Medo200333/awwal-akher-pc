@@ -4,6 +4,7 @@ export type SheetSpec = {
   name: string;
   widths: number[];
   rows: (string | number)[][];
+  ltr?: boolean;
 };
 
 function escapeXml(value: string): string {
@@ -25,16 +26,18 @@ function colName(index: number): string {
   return name;
 }
 
-function sheetXml(rows: (string | number)[][], widths: number[], shared: Map<string, number>): string {
+function sheetXml(rows: (string | number)[][], widths: number[], shared: Map<string, number>, ltr: boolean): string {
   const cols = widths
     .map((width, index) => `<col min="${index + 1}" max="${index + 1}" width="${width}" customWidth="1"/>`)
     .join("");
   const body = rows
     .map((row, rowIndex) => {
+      const tall = row.some((value) => String(value ?? "").includes("\n"));
+      const header = ltr ? row[0] === "First name" || rowIndex === 0 : rowIndex === 0;
       const cells = row
         .map((value, colIndex) => {
           const ref = `${colName(colIndex)}${rowIndex + 1}`;
-          const style = rowIndex === 0 ? 1 : 0;
+          const style = ltr ? (header ? 3 : 2) : header ? 1 : 0;
           if (typeof value === "number" && Number.isFinite(value)) {
             return `<c r="${ref}" s="${style}"><v>${value}</v></c>`;
           }
@@ -48,13 +51,15 @@ function sheetXml(rows: (string | number)[][], widths: number[], shared: Map<str
           return `<c r="${ref}" t="s" s="${style}"><v>${id}</v></c>`;
         })
         .join("");
-      return `<row r="${rowIndex + 1}">${cells}</row>`;
+      const height = tall ? ` ht="${header ? 32 : 48}" customHeight="1"` : "";
+      return `<row r="${rowIndex + 1}"${height}>${cells}</row>`;
     })
     .join("");
+  const direction = ltr ? "" : ` rightToLeft="1"`;
 
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <sheetViews><sheetView rightToLeft="1" workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
+  <sheetViews><sheetView${direction} workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
   <cols>${cols}</cols>
   <sheetData>${body}</sheetData>
 </worksheet>`;
@@ -62,7 +67,7 @@ function sheetXml(rows: (string | number)[][], widths: number[], shared: Map<str
 
 export function buildXlsx(sheets: SheetSpec[]): Uint8Array {
   const shared = new Map<string, number>();
-  const sheetXmls = sheets.map((sheet) => sheetXml(sheet.rows, sheet.widths, shared));
+  const sheetXmls = sheets.map((sheet) => sheetXml(sheet.rows, sheet.widths, shared, Boolean(sheet.ltr)));
   const sharedXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="${shared.size}" uniqueCount="${shared.size}">
 ${[...shared.keys()].map((value) => `<si><t xml:space="preserve">${escapeXml(value)}</t></si>`).join("")}
@@ -112,20 +117,24 @@ ${[...shared.keys()].map((value) => `<si><t xml:space="preserve">${escapeXml(val
 </Relationships>`),
     "xl/styles.xml": strToU8(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <fonts count="2">
+  <fonts count="3">
     <font><sz val="11"/><name val="Calibri"/></font>
     <font><b/><sz val="11"/><color rgb="FF1C1408"/><name val="Calibri"/></font>
+    <font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>
   </fonts>
-  <fills count="3">
+  <fills count="4">
     <fill><patternFill patternType="none"/></fill>
     <fill><patternFill patternType="gray125"/></fill>
     <fill><patternFill patternType="solid"><fgColor rgb="FFE0B15A"/></patternFill></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FF0C3D66"/></patternFill></fill>
   </fills>
   <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
   <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-  <cellXfs count="2">
+  <cellXfs count="4">
     <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment readingOrder="2"/></xf>
     <xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment readingOrder="2"/></xf>
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment wrapText="1" vertical="center" readingOrder="1"/></xf>
+    <xf numFmtId="0" fontId="2" fillId="3" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment wrapText="1" horizontal="center" vertical="center" readingOrder="1"/></xf>
   </cellXfs>
 </styleSheet>`),
     "xl/sharedStrings.xml": strToU8(sharedXml),
