@@ -964,10 +964,11 @@ const TEAM_BUTTONS: {
     ar: "المنطقة",
     en: "Area",
     meaning: "بتجمع الأجهزة والناس. منطقة واحدة يعني الكل يبصم من أي جهاز فيها. كل فرع منطقة يعني الموظف ينزل على أجهزة فرعه بس.",
-    keys: ["areaName", "name"],
+    keys: ["areaName", "parentAreaName"],
     probes: [
-      { path: "/ccfres/v1/logicalresource/area/search", body: { pageIndex: 1, pageSize: 200 } },
-      { path: "/ccfarea/v1/area/search", body: { pageIndex: 1, pageSize: 200 } },
+      { path: "/ccfres/v1/areas/search", body: { areaSearchRequest: { pageIndex: 1, pageSize: 200 } } },
+      { path: "/ccfres/v1/logicalresource/area/list", body: { pageIndex: 1, pageSize: 200 } },
+      { path: "/hccattendance/checkPoint/v1/list", body: { page: 1, pageSize: 100, name: "" } },
     ],
   },
   {
@@ -983,7 +984,7 @@ const TEAM_BUTTONS: {
     ar: "الأشخاص",
     en: "Person",
     meaning: "الموظف. رقم الشخص على التيم لازم يفضل نفس الرقم على الجهاز، وإلا البصمات ما تتجمعش.",
-    keys: ["fullName"],
+    keys: ["fullName", "firstName", "lastName", "personName"],
     probes: [
       {
         path: "/ccfperson/v1/persons/search",
@@ -1003,10 +1004,10 @@ const TEAM_BUTTONS: {
     ar: "الأجهزة",
     en: "Device",
     meaning: "البصمة أو كنترول الباب. بيتضاف بالسيريال وكود التحقق جوه المنطقة.",
-    keys: ["deviceName", "alias"],
+    keys: ["name", "deviceName"],
     probes: [
+      { path: "/hccattendance/checkPoint/v1/list", body: { page: 1, pageSize: 100, name: "" } },
       { path: "/ccfres/v1/devices/search", body: { pageIndex: 1, pageSize: 100 } },
-      { path: "/resource/v1/devices/search", body: { pageIndex: 1, pageSize: 100 } },
     ],
   },
   {
@@ -1016,8 +1017,9 @@ const TEAM_BUTTONS: {
     meaning: "بيقول الشخص يدخل أنهي باب وفي أي وقت. من غيره الجهاز أونلاين والشخص مش ظاهر عليه.",
     keys: ["accessLevelName", "name"],
     probes: [
-      { path: "/acspm/v1/accesslevel/list", body: { pageIndex: 1, pageSize: 100 } },
-      { path: "/hccacs/v1/accesslevel/search", body: { pageIndex: 1, pageSize: 100 } },
+      { path: "/acspm/v1/accesslevel/list", body: { accessLevelSearchRequest: { pageIndex: 1, pageSize: 100 } } },
+      { path: "/acspm/v1/accesslevel/search", body: { pageIndex: 1, pageSize: 100 } },
+      { path: "/hccacs/v1/accesslevel/search", body: { accessLevelSearchRequest: { pageIndex: 1, pageSize: 100 } } },
     ],
   },
   {
@@ -1068,9 +1070,12 @@ export async function hikReadMap(apiBase: string, sessionId: string): Promise<Te
           body: JSON.stringify(probe.body),
         });
         if (!payloadOpened(result.json, result.status)) continue;
-        foundPath = probe.path;
-        names = [...new Set(namedValues(result.json, spec.keys))].slice(0, 24);
-        break;
+        const got = [...new Set(namedValues(result.json, spec.keys))].slice(0, 24);
+        if (!foundPath || got.length > names.length) {
+          foundPath = probe.path;
+          names = got;
+        }
+        if (names.length) break;
       }
       buttons.push({
         key: spec.key,
@@ -1082,6 +1087,36 @@ export async function hikReadMap(apiBase: string, sessionId: string): Promise<Te
         count: names.length,
         names,
       });
+    }
+    const people = buttons.find((button) => button.key === "person");
+    if (people && people.count === 0) {
+      const groups = await readBody(`${base}/ccfperson/v1/groups/search`, {
+        method: "POST",
+        headers: teamHeaders(sessionId),
+        body: JSON.stringify({ personGroupSearchRequest: { depthTraversal: true } }),
+      });
+      const groupIds = [...new Set(namedValues(groups.json, ["groupId", "id"]))].slice(0, 8);
+      for (const groupId of ["1", ...groupIds]) {
+        const result = await readBody(`${base}/ccfperson/v1/persons/search`, {
+          method: "POST",
+          headers: teamHeaders(sessionId),
+          body: JSON.stringify({
+            pageSize: 100,
+            pageIndex: 1,
+            responseMode: 0,
+            productId: "3",
+            field: "FullPath",
+            searchCriteria: { personGroup: { groupId }, logicalOperation: 1 },
+          }),
+        });
+        const got = [...new Set(namedValues(result.json, ["fullName", "firstName", "lastName"]))].slice(0, 24);
+        if (!got.length) continue;
+        people.found = true;
+        people.path = "/ccfperson/v1/persons/search";
+        people.names = got;
+        people.count = got.length;
+        break;
+      }
     }
     const fingerprint = buttons.map((button) => `${button.key}:${button.path}:${button.count}:${button.names.join("|")}`).join(";");
     return { ok: true, stamp: new Date().toISOString(), fingerprint, buttons };
